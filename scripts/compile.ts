@@ -7,10 +7,10 @@
  * have been compiled per target.
  *
  * Usage:
- *   bun scripts/compile.ts status [--target <name>]
- *   bun scripts/compile.ts prompt --target <name> [--component <name>]
- *   bun scripts/compile.ts lock   --target <name> [--component <name>]
- *   bun scripts/compile.ts clean  --target <name>
+ *   bun run compile status [--target <name>]
+ *   bun run compile prompt --target <name> [--component <name>]
+ *   bun run compile lock   --target <name> [--component <name>]
+ *   bun run compile clean  --target <name>
  */
 
 import { createHash } from "node:crypto";
@@ -315,10 +315,11 @@ function cmdStatus(targetFilter?: string): void {
                 const tag = d.reason === "new" ? "NEW" : d.reason.toUpperCase();
                 log(`   ${chalk.dim("├─")} ${d.spec.name} ${chalk.dim(`[${tag}]`)}`);
             }
+            log(`   ${chalk.dim("└─")} ${chalk.cyan(`bun run compile prompt --target ${target}`)}`);
         }
 
         if (lock) {
-            log(`   ${chalk.dim(`└─ last locked: ${lock.updatedAt}`)}`);
+            log(`   ${chalk.dim(`   last locked: ${lock.updatedAt}`)}`);
         }
         log("");
     }
@@ -359,7 +360,7 @@ function cmdPrompt(target: string, componentFilter?: string, distDir: string = D
     }
     log("");
     log("Feed this prompt to an LLM agent, then run:");
-    log(`   bun scripts/compile.ts lock --target ${target}`);
+    log(`   bun run compile lock --target ${target}`);
     log("");
 }
 
@@ -429,12 +430,12 @@ Options:
   --out <dir>   Output directory for compiled code (default: specs/dist/)
 
 Examples:
-  bun scripts/compile.ts status
-  bun scripts/compile.ts prompt --target go
-  bun scripts/compile.ts prompt --target go --out ./my-tuikit
-  bun scripts/compile.ts prompt --target rust --component HintBar
-  bun scripts/compile.ts lock --target go
-  bun scripts/compile.ts clean --target bun
+  bun run compile status
+  bun run compile prompt --target go
+  bun run compile prompt --target go --out ./my-tuikit
+  bun run compile prompt --target rust --component HintBar
+  bun run compile lock --target go
+  bun run compile clean --target bun
 `);
 }
 

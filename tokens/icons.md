@@ -34,6 +34,9 @@ groups:
             iconWorking: CIRCLE_HALF
             iconCompleted: CIRCLE_FILLED
             iconEmpty: CIRCLE_EMPTY
+            iconInfoCompleted: CIRCLE_FILLED
+            iconInfoWorking: CIRCLE_HALF
+            iconInfoEmpty: CIRCLE_EMPTY
 
     navigation:
         description: Directional indicators and keyboard key representations
@@ -76,12 +79,19 @@ groups:
             SCROLLBAR: { char: "▋", role: "Scrollbar thumb" }
             CHECKBOX_UNCHECKED: { char: "[ ]", role: "Unchecked checkbox" }
             CHECKBOX_CHECKED: { char: "[✓]", role: "Checked checkbox" }
+        semantic_aliases:
+            iconScrollbar: SCROLLBAR
+            iconCheckboxChecked: CHECKBOX_CHECKED
+            iconCheckboxUnchecked: CHECKBOX_UNCHECKED
 
     separator:
         description: Inline separators and list markers
         glyphs:
             DOT_SEPARATOR: { char: "·", role: "Word-level separator (used in hint bars)" }
             BULLET: { char: "•", role: "List item marker" }
+        semantic_aliases:
+            iconSeparatorWord: DOT_SEPARATOR
+            iconSeparatorList: BULLET
 
     nesting:
         description: Tree and hierarchy connectors
@@ -89,6 +99,10 @@ groups:
             CHILD_LAST: { char: "└", role: "Last child in tree" }
             CHILD_MIDDLE: { char: "├", role: "Middle child in tree" }
             CHILD_SKIP: { char: "│", role: "Vertical continuation line" }
+        semantic_aliases:
+            iconNestingLast: CHILD_LAST
+            iconNestingMiddle: CHILD_MIDDLE
+            iconNestingSkip: CHILD_SKIP
 ---
 
 # Icon Tokens
