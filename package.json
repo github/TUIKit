@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "lint": "bun scripts/lint.ts",
+    "compile": "bun scripts/compile.ts"
+  },
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "gray-matter": "^4.0.3",
+    "zod": "^4.3.6"
+  }
+}

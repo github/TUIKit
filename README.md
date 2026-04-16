@@ -31,36 +31,44 @@ idiomatic implementations per target framework.
 
 ## Quick start
 
+### Prerequisites
+
+- [Bun](https://bun.sh/) 1.1+ installed (`bun --version`)
+
+### Install dependencies
+
+This repo currently has no external package dependencies to install.
+All commands run directly with Bun:
+
 ```bash
 # Check what needs compiling
-bun compile.ts status
+bun scripts/compile.ts status
 
 # Generate a prompt for the Go target
-bun compile.ts prompt --target go
+bun scripts/compile.ts prompt --target go
 
 # The prompt is written to dist/go/_compile-prompt.md
 # Feed it to an LLM agent (e.g. Copilot CLI, Claude, etc.)
 # The agent writes generated code to dist/go/
 
 # After verifying the generated code works, lock the hashes
-bun compile.ts lock --target go
+bun scripts/compile.ts lock --target go
 
 # Lint all specs against the schema
-bun lint.ts
+bun scripts/lint.ts
 ```
 
 ## Specs directory structure
 
 ```
 specs/
-  _schema.md            Meta-spec — defines the format for all specs
+  docs/schema.md            Meta-spec — defines the format for all specs
   compile.ts            Compiler CLI
   lint.ts               Linter CLI
   targets/
     go.md               Go + Bubbletea target definition
     bun.md              Bun + Ink target definition
     rust.md             Rust + Ratatui target definition
-    csharp.md           C# + Spectre.Console target definition
     *.lock.json         Lock files (per target, committed)
   tokens/
     colors.md           Semantic color tokens
@@ -155,7 +163,7 @@ Hello
 ​`
 ```
 
-See `_schema.md` for the full format reference, including `input`, `state`,
+See `docs/schema.md` for the full format reference, including `input`, `state`,
 `style`, and `accessibility` test blocks.
 
 ### Conformance language
@@ -177,16 +185,15 @@ All normative sections (Visual rules, Behavior, Edge cases) use
 | `go`     | Go         | Bubbletea + Lipgloss | `targets/go.md`     |
 | `bun`    | TypeScript | Ink + React          | `targets/bun.md`    |
 | `rust`   | Rust       | Ratatui + Crossterm  | `targets/rust.md`   |
-| `csharp` | C#         | Spectre.Console      | `targets/csharp.md` |
 
 ### Workflow
 
 ```bash
 # 1. See what's changed
-bun compile.ts status
+bun scripts/compile.ts status
 
 # 2. Generate the compilation prompt
-bun compile.ts prompt --target go
+bun scripts/compile.ts prompt --target go
 
 # 3. Feed dist/go/_compile-prompt.md to an LLM agent
 #    The agent generates code into dist/go/
@@ -195,7 +202,7 @@ bun compile.ts prompt --target go
 cd dist/go && go test ./... && go run ./cmd/demo
 
 # 5. Lock the hashes
-bun compile.ts lock --target go
+bun scripts/compile.ts lock --target go
 ```
 
 ### Custom output directory
@@ -204,19 +211,19 @@ By default, compiled code goes to `specs/dist/`. Override with `--out`:
 
 ```bash
 # Output to a separate repo or directory
-bun compile.ts prompt --target go --out ~/my-tuikit-go
+bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go
 
 # The prompt and generated code go to ~/my-tuikit-go/go/
 ```
 
 ### Adding a new target
 
-1. Create `targets/{name}.md` following the target spec format in `_schema.md`
+1. Create `targets/{name}.md` following the target spec format in `docs/schema.md`
 2. Define: architecture pattern, type mapping, callback translation, state
    machine pattern, token access, styling, composition, test pattern, key
    mapping, dependencies, and demo CLI
-3. Run `bun compile.ts status` — your target will show up with all specs dirty
-4. Run `bun compile.ts prompt --target {name}` and compile
+3. Run `bun scripts/compile.ts status` — your target will show up with all specs dirty
+4. Run `bun scripts/compile.ts prompt --target {name}` and compile
 
 ## Building your own component library
 
@@ -232,7 +239,7 @@ go mod init github.com/myorg/tuikit
 
 # 2. Generate the full compilation prompt
 cd /path/to/specs
-bun compile.ts prompt --target go --out ~/my-tuikit-go
+bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go
 
 # 3. Feed the prompt to an LLM agent
 #    Point the agent at ~/my-tuikit-go/go/_compile-prompt.md
@@ -243,7 +250,7 @@ cd ~/my-tuikit-go/go && go test ./...
 
 # 5. Lock the compiled state
 cd /path/to/specs
-bun compile.ts lock --target go
+bun scripts/compile.ts lock --target go
 ```
 
 Your component library now lives in `~/my-tuikit-go/` — a standalone project
@@ -256,17 +263,17 @@ need to recompile everything:
 
 ```bash
 # See what changed since last compilation
-bun compile.ts status --target go
+bun scripts/compile.ts status --target go
 
 # Generate a prompt with only dirty specs
-bun compile.ts prompt --target go --out ~/my-tuikit-go
+bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go
 
 # The prompt tells the agent exactly which components to update
 # Feed it to the agent — it patches your existing codebase
 
 # Verify and lock
 cd ~/my-tuikit-go/go && go test ./...
-cd /path/to/specs && bun compile.ts lock --target go
+cd /path/to/specs && bun scripts/compile.ts lock --target go
 ```
 
 ### Extending with custom components
@@ -275,8 +282,8 @@ You can add components to the specs and compile them into your library:
 
 1. Create `components/MyComponent/MyComponent.md` following the format
 2. Create `components/MyComponent/MyComponent.test.md` with behavioral tests
-3. Run `bun lint.ts` to validate against the schema
-4. Run `bun compile.ts prompt --target go --out ~/my-tuikit-go`
+3. Run `bun scripts/lint.ts` to validate against the schema
+4. Run `bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go`
 5. The new component appears in the prompt alongside any other dirty specs
 
 ### Multiple targets from one spec set
@@ -285,28 +292,26 @@ The same specs can produce libraries for different languages simultaneously:
 
 ```bash
 # Compile to all your targets
-bun compile.ts prompt --target go --out ~/tuikit-go
-bun compile.ts prompt --target rust --out ~/tuikit-rust
-bun compile.ts prompt --target csharp --out ~/tuikit-csharp
+bun scripts/compile.ts prompt --target go --out ~/tuikit-go
+bun scripts/compile.ts prompt --target rust --out ~/tuikit-rust
 
 # Each output is a standalone project with idiomatic code
 # Lock each target independently
-bun compile.ts lock --target go
-bun compile.ts lock --target rust
-bun compile.ts lock --target csharp
+bun scripts/compile.ts lock --target go
+bun scripts/compile.ts lock --target rust
 ```
 
 ## Linting
 
 ```bash
 # Lint all specs
-bun lint.ts
+bun scripts/lint.ts
 
 # Lint a single component
-bun lint.ts --component Select
+bun scripts/lint.ts --component Select
 
 # Show fix suggestions
-bun lint.ts --fix
+bun scripts/lint.ts --fix
 ```
 
 The linter checks:

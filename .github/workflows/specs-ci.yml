@@ -1,0 +1,102 @@
+name: Specs CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  specs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Spec lint
+        run: bun scripts/lint.ts
+
+      - name: Discover targets
+        id: targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGETS="$(find targets -maxdepth 1 -name '*.md' -type f -exec basename {} .md \; | sort | tr '\n' ' ')"
+          TARGETS="$(echo "$TARGETS" | xargs)"
+          if [ -z "$TARGETS" ]; then
+            echo "No targets found under targets/*.md" >&2
+            exit 1
+          fi
+          echo "targets=$TARGETS" >> "$GITHUB_OUTPUT"
+          echo "Discovered targets: $TARGETS"
+
+      - name: Compiler health (all targets)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for t in ${{ steps.targets.outputs.targets }}; do
+            echo "== status: $t =="
+            bun scripts/compile.ts status --target "$t"
+          done
+
+      - name: Prompt generation smoke test (all targets)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for t in ${{ steps.targets.outputs.targets }}; do
+            echo "== prompt: $t =="
+            bun scripts/compile.ts prompt --target "$t"
+          done
+
+      - name: No generated output committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files --error-unmatch dist >/dev/null 2>&1; then
+            echo "dist/ is tracked but must remain generated-only." >&2
+            exit 1
+          fi
+          if git diff --name-only "origin/${{ github.base_ref || 'main' }}"...HEAD | grep -E '^dist/'; then
+            echo "PR includes files under dist/; remove generated output from commits." >&2
+            exit 1
+          fi
+
+      - name: Changed-spec completeness
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="origin/${{ github.base_ref }}"
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          CHANGED="$(git diff --name-only "$BASE"...HEAD)"
+          FAIL=0
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              components/*/*.md)
+                case "$file" in
+                  *.test.md|*.preview.md) continue ;;
+                esac
+                dir="$(dirname "$file")"
+                name="$(basename "$file" .md)"
+                test_file="$dir/$name.test.md"
+                preview_file="$dir/$name.preview.md"
+                if ! echo "$CHANGED" | grep -Fxq "$test_file"; then
+                  echo "Missing changed test spec: $test_file (required when $file changes)" >&2
+                  FAIL=1
+                fi
+                if ! echo "$CHANGED" | grep -Fxq "$preview_file"; then
+                  echo "Missing changed preview spec: $preview_file (required when $file changes)" >&2
+                  FAIL=1
+                fi
+                ;;
+            esac
+          done <<< "$CHANGED"
+          [ "$FAIL" -eq 0 ]

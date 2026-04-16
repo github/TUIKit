@@ -31,7 +31,7 @@ keywords for any statement that affects rendered output or interaction logic.
 
 ```
 specs/
-  _schema.md              ← this file (meta-spec)
+  docs/schema.md          ← this file (meta-spec)
   README.md               ← getting started guide
   compile.ts              ← compiler CLI (status/prompt/lock/clean)
   lint.ts                 ← linter CLI (validate specs against schema)
@@ -39,7 +39,6 @@ specs/
     go.md                 ← Go + Bubbletea + Lipgloss
     bun.md                ← Bun + Ink + React
     rust.md               ← Rust + Ratatui + Crossterm
-    csharp.md             ← C# + Spectre.Console
     {target}.lock.json    ← generated lock file (tracks compiled state)
   tokens/
     colors.md             ← semantic color tokens
@@ -67,22 +66,22 @@ self-contained prompts for LLM agents.
 
 ```bash
 # Show dirty/clean status for all targets
-bun compile.ts status
+bun scripts/compile.ts status
 
 # Show status for a specific target
-bun compile.ts status --target go
+bun scripts/compile.ts status --target go
 
 # Generate compilation prompt for all dirty specs
-bun compile.ts prompt --target go
+bun scripts/compile.ts prompt --target go
 
 # Generate prompt for a single component
-bun compile.ts prompt --target go --component HintBar
+bun scripts/compile.ts prompt --target go --component HintBar
 
 # Lock spec hashes after successful compilation
-bun compile.ts lock --target go
+bun scripts/compile.ts lock --target go
 
 # Remove lock file and generated prompts
-bun compile.ts clean --target go
+bun scripts/compile.ts clean --target go
 ```
 
 ### Lock file format

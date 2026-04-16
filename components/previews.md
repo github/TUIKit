@@ -58,7 +58,7 @@ in a readable grid or list format.
 
 - **TextTitle**: `"TUIkit Preview — {target name}"` where target name is
   the language/framework (e.g., "Go + Bubbletea", "Bun + Ink",
-  "Rust + Ratatui", "C# + Spectre.Console")
+  "Rust + Ratatui")
 - Below the title, show breadcrumb: `"Home"` on picker, `"Home > {Name}"` on preview
 
 ## HintBar (always visible at bottom)

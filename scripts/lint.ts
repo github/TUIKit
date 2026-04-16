@@ -7,20 +7,21 @@
  * dependencies, accessibility, and cross-references.
  *
  * Usage:
- *   bun lint.ts                          # lint all specs
- *   bun lint.ts --component HintBar      # lint one component
- *   bun lint.ts --fix                    # show suggested fixes
+ *   bun scripts/lint.ts                          # lint all specs
+ *   bun scripts/lint.ts --component HintBar      # lint one component
+ *   bun scripts/lint.ts --fix                    # show suggested fixes
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import chalk from "chalk";
 
 // biome-ignore lint/suspicious/noConsole: CLI tool — stdout is the interface
 const log = (...args: unknown[]) => console.log(...args);
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 
-const SPECS_DIR = dirname(new URL(import.meta.url).pathname);
+const SPECS_DIR = join(dirname(new URL(import.meta.url).pathname), "..");
 const TOKENS_DIR = join(SPECS_DIR, "tokens");
 const COMPONENTS_DIR = join(SPECS_DIR, "components");
 const TARGETS_DIR = join(SPECS_DIR, "targets");
@@ -557,6 +558,46 @@ function lintFileNaming(diagnostics: Diagnostic[]): void {
     }
 }
 
+// ── Internal-link validation ───────────────────────────────────────────────
+
+function lintBrokenLinks(diagnostics: Diagnostic[]): void {
+    const mdFiles: string[] = [];
+    function walk(dir: string): void {
+        for (const entry of readdirSync(dir)) {
+            const full = join(dir, entry);
+            if (entry === ".git" || entry === "dist" || entry === "node_modules") continue;
+            if (statSync(full).isDirectory()) walk(full);
+            else if (entry.endsWith(".md")) mdFiles.push(full);
+        }
+    }
+    walk(SPECS_DIR);
+
+    const mdLink = /\[[^\]]+\]\(([^)]+)\)/g;
+    for (const file of mdFiles) {
+        const content = readFile(file);
+        const rel = relative(SPECS_DIR, file);
+        let match: RegExpExecArray | null;
+        while ((match = mdLink.exec(content)) !== null) {
+            const target = match[1].trim();
+            if (!target || target.startsWith("http://") || target.startsWith("https://") || target.startsWith("#") || target.startsWith("mailto:")) continue;
+            const clean = target.split("#")[0].split("?")[0];
+            if (!clean) continue;
+            const resolved = target.startsWith("/")
+                ? join(SPECS_DIR, clean.slice(1))
+                : join(dirname(file), clean);
+            if (!existsSync(resolved)) {
+                diagnostics.push({
+                    file: rel,
+                    severity: "error",
+                    rule: "link-broken",
+                    message: `Broken internal link: '${target}'`,
+                    fix: "Fix the relative path or remove the link",
+                });
+            }
+        }
+    }
+}
+
 // ── Discovery + orchestration ──────────────────────────────────────────────
 
 function discoverAndLint(componentFilter?: string): Diagnostic[] {
@@ -612,6 +653,11 @@ function discoverAndLint(componentFilter?: string): Diagnostic[] {
         lintCrossReferences(componentSpecs, tokenSpecs, diagnostics);
     }
 
+    // Broken internal links
+    if (!componentFilter) {
+        lintBrokenLinks(diagnostics);
+    }
+
     return diagnostics;
 }
 
@@ -619,7 +665,7 @@ function discoverAndLint(componentFilter?: string): Diagnostic[] {
 
 function formatDiagnostics(diagnostics: Diagnostic[], showFix: boolean): void {
     if (diagnostics.length === 0) {
-        log("\n✅ All specs valid.\n");
+        log(`\n${chalk.green("✓")} All specs valid.\n`);
         return;
     }
 
@@ -636,19 +682,19 @@ function formatDiagnostics(diagnostics: Diagnostic[], showFix: boolean): void {
 
     log("");
     for (const [file, diags] of [...byFile.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-        log(`📄 ${file}`);
+        log(`  ${chalk.bold(file)}`);
         for (const d of diags) {
-            const icon = d.severity === "error" ? "  ✖" : "  ⚠";
-            log(`${icon} [${d.rule}] ${d.message}`);
+            const icon = d.severity === "error" ? chalk.red("  ✗") : chalk.yellow("  !");
+            log(`${icon} ${chalk.dim(`[${d.rule}]`)} ${d.message}`);
             if (showFix && d.fix) {
-                log(`    💡 ${d.fix}`);
+                log(`    ${chalk.dim(`→ ${d.fix}`)}`);
             }
         }
         log("");
     }
 
-    log("───────────────────────────────────────");
-    log(`  ${errors.length} error(s), ${warnings.length} warning(s)`);
+    log(chalk.dim("───────────────────────────────────────"));
+    log(`  ${chalk.red(`${errors.length} error(s)`)}, ${chalk.yellow(`${warnings.length} warning(s)`)}`);
     log("");
 
     if (errors.length > 0) {
@@ -663,9 +709,9 @@ function usage(): void {
 TUIkit spec linter — validate specs against the schema.
 
 Usage:
-  bun lint.ts                          Lint all specs
-  bun lint.ts --component HintBar      Lint one component
-  bun lint.ts --fix                    Show suggested fixes
+  bun scripts/lint.ts                          Lint all specs
+  bun scripts/lint.ts --component HintBar      Lint one component
+  bun scripts/lint.ts --fix                    Show suggested fixes
 
 Rules checked:
   fm-kind              kind field is present and valid
@@ -695,6 +741,7 @@ Rules checked:
   naming-test          {Name}.test.md exists in component directory
   target-section       target spec has recommended body sections
   test-empty           test spec has at least one test case
+  link-broken          internal markdown links resolve to existing files
 `);
 }
 

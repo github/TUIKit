@@ -7,27 +7,28 @@
  * have been compiled per target.
  *
  * Usage:
- *   bun compile.ts status [--target <name>]
- *   bun compile.ts prompt --target <name> [--component <name>]
- *   bun compile.ts lock   --target <name> [--component <name>]
- *   bun compile.ts clean  --target <name>
+ *   bun scripts/compile.ts status [--target <name>]
+ *   bun scripts/compile.ts prompt --target <name> [--component <name>]
+ *   bun scripts/compile.ts lock   --target <name> [--component <name>]
+ *   bun scripts/compile.ts clean  --target <name>
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import chalk from "chalk";
 
 // biome-ignore lint/suspicious/noConsole: CLI tool — stdout is the interface
 const log = (...args: unknown[]) => console.log(...args);
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 
-const SPECS_DIR = dirname(new URL(import.meta.url).pathname);
+const SPECS_DIR = join(dirname(new URL(import.meta.url).pathname), "..");
 const TOKENS_DIR = join(SPECS_DIR, "tokens");
 const COMPONENTS_DIR = join(SPECS_DIR, "components");
 const TARGETS_DIR = join(SPECS_DIR, "targets");
-const SCHEMA_PATH = join(SPECS_DIR, "_schema.md");
-const DEMO_PATH = join(SPECS_DIR, "demo.md");
+const SCHEMA_PATH = join(SPECS_DIR, "docs", "schema.md");
+const DEMO_PATH = join(SPECS_DIR, "components", "previews.md");
 const DEFAULT_DIST_DIR = join(SPECS_DIR, "dist");
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -298,26 +299,26 @@ function cmdStatus(targetFilter?: string): void {
 
     const tokenCount = specs.filter((s) => s.kind === "token").length;
     const componentCount = specs.filter((s) => s.kind === "component").length;
-    log(`\n📦 TUIkit specs: ${specs.length} (${tokenCount} tokens, ${componentCount} components)`);
-    log(`📋 Schema hash: ${schemaHash}\n`);
+    log(`\n${chalk.cyan("●")} TUIkit specs: ${chalk.bold(String(specs.length))} ${chalk.dim(`(${tokenCount} tokens, ${componentCount} components)`)}`);
+    log(`${chalk.cyan("●")} Schema hash: ${chalk.dim(schemaHash)}\n`);
 
     for (const target of targets) {
         const lock = readLock(target);
         const dirty = computeDirty(specs, lock, schemaHash);
         const locked = lock ? Object.keys(lock.entries).length : 0;
 
-        const icon = dirty.length === 0 ? "✅" : "🔶";
-        log(`${icon} ${target}: ${dirty.length} dirty, ${locked} locked`);
+        const icon = dirty.length === 0 ? chalk.green("✓") : chalk.yellow("⚑");
+        log(`${icon} ${chalk.bold(target)}: ${dirty.length > 0 ? chalk.yellow(`${dirty.length} dirty`) : chalk.green("0 dirty")}, ${locked} locked`);
 
         if (dirty.length > 0) {
             for (const d of dirty) {
                 const tag = d.reason === "new" ? "NEW" : d.reason.toUpperCase();
-                log(`   ├─ ${d.spec.name} [${tag}]`);
+                log(`   ${chalk.dim("├─")} ${d.spec.name} ${chalk.dim(`[${tag}]`)}`);
             }
         }
 
         if (lock) {
-            log(`   └─ last locked: ${lock.updatedAt}`);
+            log(`   ${chalk.dim(`└─ last locked: ${lock.updatedAt}`)}`);
         }
         log("");
     }
@@ -336,7 +337,7 @@ function cmdPrompt(target: string, componentFilter?: string, distDir: string = D
     }
 
     if (dirty.length === 0) {
-        log(`✅ No dirty specs for target "${target}".`);
+        log(`${chalk.green("✓")} No dirty specs for target "${target}".`);
         return;
     }
 
@@ -349,16 +350,16 @@ function cmdPrompt(target: string, componentFilter?: string, distDir: string = D
     const outPath = join(outDir, "_compile-prompt.md");
     writeFileSync(outPath, prompt);
 
-    log(`\n📝 Compilation prompt for "${target}" (${dirty.length} dirty specs):`);
-    log(`   → ${relative(SPECS_DIR, outPath)}`);
+    log(`\n${chalk.cyan("●")} Compilation prompt for "${chalk.bold(target)}" ${chalk.dim(`(${dirty.length} dirty specs)`)}:`);
+    log(`   ${chalk.dim(`→ ${relative(SPECS_DIR, outPath)}`)}`);
     log("");
     log("Dirty specs included:");
     for (const d of dirty) {
-        log(`   ├─ ${d.spec.name} [${d.reason}]`);
+        log(`   ${chalk.dim("├─")} ${d.spec.name} ${chalk.dim(`[${d.reason}]`)}`);
     }
     log("");
     log("Feed this prompt to an LLM agent, then run:");
-    log(`   bun compile.ts lock --target ${target}`);
+    log(`   bun scripts/compile.ts lock --target ${target}`);
     log("");
 }
 
@@ -392,23 +393,23 @@ function cmdLock(target: string, componentFilter?: string): void {
 
     writeLock(lock);
 
-    log(`🔒 Locked ${toLock.length} specs for "${target}"`);
-    log(`   → ${relative(SPECS_DIR, lockPath(target))}`);
+    log(`${chalk.green("✓")} Locked ${toLock.length} specs for "${target}"`);
+    log(`   ${chalk.dim(`→ ${relative(SPECS_DIR, lockPath(target))}`)}`);
 }
 
 function cmdClean(target: string, distDir: string = DEFAULT_DIST_DIR): void {
     const p = lockPath(target);
     if (existsSync(p)) {
         rmSync(p);
-        log(`🧹 Removed lock file for "${target}"`);
+        log(`${chalk.green("✓")} Removed lock file for "${target}"`);
     } else {
-        log(`No lock file found for "${target}"`);
+        log(chalk.dim(`No lock file found for "${target}"`));
     }
 
     const promptPath = join(distDir, target, "_compile-prompt.md");
     if (existsSync(promptPath)) {
         rmSync(promptPath);
-        log(`🧹 Removed compile prompt for "${target}"`);
+        log(`${chalk.green("✓")} Removed compile prompt for "${target}"`);
     }
 }
 
@@ -428,12 +429,12 @@ Options:
   --out <dir>   Output directory for compiled code (default: specs/dist/)
 
 Examples:
-  bun compile.ts status
-  bun compile.ts prompt --target go
-  bun compile.ts prompt --target go --out ./my-tuikit
-  bun compile.ts prompt --target rust --component HintBar
-  bun compile.ts lock --target go
-  bun compile.ts clean --target bun
+  bun scripts/compile.ts status
+  bun scripts/compile.ts prompt --target go
+  bun scripts/compile.ts prompt --target go --out ./my-tuikit
+  bun scripts/compile.ts prompt --target rust --component HintBar
+  bun scripts/compile.ts lock --target go
+  bun scripts/compile.ts clean --target bun
 `);
 }
 
