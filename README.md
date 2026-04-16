@@ -37,49 +37,59 @@ idiomatic implementations per target framework.
 
 ### Install dependencies
 
-This repo currently has no external package dependencies to install.
-All commands run directly with Bun:
+```bash
+bun install
+```
+
+### Common commands
 
 ```bash
-# Check what needs compiling
-bun scripts/compile.ts status
+# Lint all specs against the schema
+bun run lint
 
-# Generate a prompt for the Go target
-bun scripts/compile.ts prompt --target go
+# Check what needs compiling
+bun run compile status
+
+# Generate a prompt for a target
+bun run compile prompt --target go
 
 # The prompt is written to dist/go/_compile-prompt.md
 # Feed it to an LLM agent (e.g. Copilot CLI, Claude, etc.)
 # The agent writes generated code to dist/go/
 
 # After verifying the generated code works, lock the hashes
-bun scripts/compile.ts lock --target go
-
-# Lint all specs against the schema
-bun scripts/lint.ts
+bun run compile lock --target go
 ```
 
-## Specs directory structure
+## Repository structure
 
 ```
-specs/
-  docs/schema.md            Meta-spec — defines the format for all specs
-  compile.ts            Compiler CLI
-  lint.ts               Linter CLI
-  targets/
-    go.md               Go + Bubbletea target definition
-    bun.md              Bun + Ink target definition
-    rust.md             Rust + Ratatui target definition
-    *.lock.json         Lock files (per target, committed)
-  tokens/
-    colors.md           Semantic color tokens
-    icons.md            Icon glyphs and aliases
-    breakpoints.md      Responsive width thresholds
+TUIKit/
+  .github/
+    workflows/
+      specs-ci.yml          CI workflow (lint, compile health, prompt smoke test)
   components/
     {Name}/
-      {Name}.md         Component spec
-      {Name}.test.md    Behavioral test spec
-  dist/                 Compiled output (gitignored)
-    {target}/           One folder per target
+      {Name}.md             Component spec
+      {Name}.test.md        Behavioral test spec
+      {Name}.preview.md     Preview/demo variants
+    previews.md             Demo app spec (all components together)
+  docs/
+    schema.md               Meta-spec — defines the format for all spec types
+  scripts/
+    compile.ts              Compiler CLI (status, prompt, lock, clean)
+    lint.ts                 Linter CLI
+    lint-rules.ts           Lint rule definitions, zod schemas, and config
+  targets/
+    go.md                   Go + Bubbletea target definition
+    bun.md                  Bun + Ink target definition
+    rust.md                 Rust + Ratatui target definition
+  tokens/
+    colors.md               Semantic color tokens
+    icons.md                Icon glyphs and semantic aliases
+    breakpoints.md          Responsive width thresholds
+  dist/                     Compiled output (gitignored)
+  package.json              Dependencies and scripts
 ```
 
 ## Writing specs
@@ -190,10 +200,10 @@ All normative sections (Visual rules, Behavior, Edge cases) use
 
 ```bash
 # 1. See what's changed
-bun scripts/compile.ts status
+bun run compile status
 
 # 2. Generate the compilation prompt
-bun scripts/compile.ts prompt --target go
+bun run compile prompt --target go
 
 # 3. Feed dist/go/_compile-prompt.md to an LLM agent
 #    The agent generates code into dist/go/
@@ -202,16 +212,16 @@ bun scripts/compile.ts prompt --target go
 cd dist/go && go test ./... && go run ./cmd/demo
 
 # 5. Lock the hashes
-bun scripts/compile.ts lock --target go
+bun run compile lock --target go
 ```
 
 ### Custom output directory
 
-By default, compiled code goes to `specs/dist/`. Override with `--out`:
+By default, compiled code goes to `dist/`. Override with `--out`:
 
 ```bash
 # Output to a separate repo or directory
-bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go
+bun run compile prompt --target go --out ~/my-tuikit-go
 
 # The prompt and generated code go to ~/my-tuikit-go/go/
 ```
@@ -222,8 +232,8 @@ bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go
 2. Define: architecture pattern, type mapping, callback translation, state
    machine pattern, token access, styling, composition, test pattern, key
    mapping, dependencies, and demo CLI
-3. Run `bun scripts/compile.ts status` — your target will show up with all specs dirty
-4. Run `bun scripts/compile.ts prompt --target {name}` and compile
+3. Run `bun run compile status` — your target will show up with all specs dirty
+4. Run `bun run compile prompt --target {name}` and compile
 
 ## Building your own component library
 
@@ -238,8 +248,7 @@ mkdir ~/my-tuikit-go && cd ~/my-tuikit-go
 go mod init github.com/myorg/tuikit
 
 # 2. Generate the full compilation prompt
-cd /path/to/specs
-bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go
+bun run compile prompt --target go --out ~/my-tuikit-go
 
 # 3. Feed the prompt to an LLM agent
 #    Point the agent at ~/my-tuikit-go/go/_compile-prompt.md
@@ -249,8 +258,7 @@ bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go
 cd ~/my-tuikit-go/go && go test ./...
 
 # 5. Lock the compiled state
-cd /path/to/specs
-bun scripts/compile.ts lock --target go
+bun run compile lock --target go
 ```
 
 Your component library now lives in `~/my-tuikit-go/` — a standalone project
@@ -263,17 +271,17 @@ need to recompile everything:
 
 ```bash
 # See what changed since last compilation
-bun scripts/compile.ts status --target go
+bun run compile status --target go
 
 # Generate a prompt with only dirty specs
-bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go
+bun run compile prompt --target go --out ~/my-tuikit-go
 
 # The prompt tells the agent exactly which components to update
 # Feed it to the agent — it patches your existing codebase
 
 # Verify and lock
 cd ~/my-tuikit-go/go && go test ./...
-cd /path/to/specs && bun scripts/compile.ts lock --target go
+bun run compile lock --target go
 ```
 
 ### Extending with custom components
@@ -282,8 +290,8 @@ You can add components to the specs and compile them into your library:
 
 1. Create `components/MyComponent/MyComponent.md` following the format
 2. Create `components/MyComponent/MyComponent.test.md` with behavioral tests
-3. Run `bun scripts/lint.ts` to validate against the schema
-4. Run `bun scripts/compile.ts prompt --target go --out ~/my-tuikit-go`
+3. Run `bun run lint` to validate against the schema
+4. Run `bun run compile prompt --target go --out ~/my-tuikit-go`
 5. The new component appears in the prompt alongside any other dirty specs
 
 ### Multiple targets from one spec set
@@ -292,37 +300,54 @@ The same specs can produce libraries for different languages simultaneously:
 
 ```bash
 # Compile to all your targets
-bun scripts/compile.ts prompt --target go --out ~/tuikit-go
-bun scripts/compile.ts prompt --target rust --out ~/tuikit-rust
+bun run compile prompt --target go --out ~/tuikit-go
+bun run compile prompt --target rust --out ~/tuikit-rust
 
 # Each output is a standalone project with idiomatic code
 # Lock each target independently
-bun scripts/compile.ts lock --target go
-bun scripts/compile.ts lock --target rust
+bun run compile lock --target go
+bun run compile lock --target rust
 ```
 
 ## Linting
 
 ```bash
 # Lint all specs
-bun scripts/lint.ts
+bun run lint
 
 # Lint a single component
-bun scripts/lint.ts --component Select
+bun run lint --component Select
 
 # Show fix suggestions
-bun scripts/lint.ts --fix
+bun run lint --fix
+
+# See all rules
+bun run lint --help
 ```
 
 The linter checks:
 
-- Required frontmatter fields and valid values
+- Required frontmatter fields and valid values (zod schemas)
 - Naming conventions (PascalCase components, camelCase props)
 - RFC 2119 keyword usage in normative sections
 - ARIA accessibility structure for interactive components
 - Token cross-references resolve to known tokens
 - Required body sections (Visual rules, Rendering example, Dependencies)
 - Test specs reference existing components
+- Broken internal markdown links
+
+Rule definitions live in `scripts/lint-rules.ts` — edit that file to add or
+change rules, severities, and fix hints.
+
+## CI checks
+
+The GitHub Actions workflow (`.github/workflows/specs-ci.yml`) runs on every PR:
+
+1. **Spec lint** — `bun run lint`
+2. **Compiler health** — `bun run compile status` for each target
+3. **Prompt smoke test** — `bun run compile prompt` for each target
+4. **No generated output committed** — ensures `dist/` is not tracked
+5. **Changed-spec completeness** — if `{Name}.md` changes, matching `.test.md` and `.preview.md` must also change
 
 ## Design principles
 
@@ -339,4 +364,5 @@ The linter checks:
   headless UI libraries like Radix or Base UI).
 
 - **Lock files enable incremental compilation** — only dirty specs trigger
-  regeneration. Schema changes invalidate everything.
+  regeneration. Schema changes invalidate everything. Lock files are gitignored;
+  a fresh clone starts with everything dirty.
