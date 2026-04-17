@@ -183,11 +183,12 @@ All normative sections (Visual rules, Behavior, Edge cases) use
 
 ### Available targets
 
-| Target   | Language   | Framework            | File                |
-| -------- | ---------- | -------------------- | ------------------- |
-| `go`     | Go         | Bubbletea + Lipgloss | `targets/go.md`     |
-| `bun`    | TypeScript | Ink + React          | `targets/bun.md`    |
-| `rust`   | Rust       | Ratatui + Crossterm  | `targets/rust.md`   |
+| Target   | Language   | Framework              | File                |
+| -------- | ---------- | ---------------------- | ------------------- |
+| `go`     | Go         | Bubbletea + Lipgloss   | `targets/go.md`     |
+| `node`   | TypeScript | Ink + React (Node.js)  | `targets/node.md`   |
+| `bun`    | TypeScript | OpenTUI + React (Bun)  | `targets/bun.md`    |
+| `rust`   | Rust       | Ratatui + Crossterm    | `targets/rust.md`   |
 
 ### Workflow
 
@@ -207,6 +208,35 @@ cd dist/go && go test ./... && go run ./cmd/demo
 # 5. Lock the hashes
 bun run compile lock --target go
 ```
+
+### Multi-pass compilation
+
+A single compilation pass across the full component suite (17 components +
+tokens + demo) is usually not enough to reach production quality. We've found
+that **2–3 passes** produce notably better results:
+
+| Pass | Focus | Typical outcome |
+| ---- | ----- | --------------- |
+| **1st** | Initial generation | All components scaffold correctly, most tests pass, demo wires up. Expect rough edges — missing edge cases, incomplete keybindings, demo wiring bugs. |
+| **2nd** | Review & fix | Agent reviews its own output against specs, fixes test failures, fills in missing behavior, improves demo interactivity. Test count typically grows 30–50%. |
+| **3rd** | Polish | Catches subtle spec violations, improves accessibility, hardens demo `--snapshot` smoke tests. Diminishing returns after this point. |
+
+To run a follow-up pass, generate a new prompt and tell the agent to review
+and complete its existing work:
+
+```bash
+# Generate a fresh prompt (it sees the current dist/ state)
+bun run compile prompt --target go
+
+# Feed to the agent with instructions like:
+# "Review your existing implementation against the specs.
+#  Fix any test failures, fill in missing behavior,
+#  and ensure all --snapshot smoke tests pass."
+```
+
+Each pass is fast because the agent builds on its own prior output rather than
+starting from scratch. The demo's `--list` and `--snapshot` flags make it easy
+for the agent to self-verify between passes.
 
 ### Custom output directory
 
