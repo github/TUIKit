@@ -1,8 +1,8 @@
 ---
 kind: target
-name: bun
+name: node
 language: TypeScript
-runtime: Bun 1.1+
+runtime: Node.js 20+
 framework:
     name: Ink
     version: ">=5.0"
@@ -14,8 +14,8 @@ styling:
     url: https://github.com/chalk/chalk
     role: ANSI color encoding (hex → SGR codes)
 testing:
-    runner: bun test
-    framework: bun:test (Jest-compatible)
+    runner: npx vitest run
+    framework: vitest
     helper: ink-testing-library
 
 output:
@@ -31,13 +31,13 @@ output:
         index.ts: Public re-exports
 ---
 
-# Bun Target — Ink + React
+# Node Target — Ink + React
 
 ## Architecture pattern
 
-This target uses the **same paradigm** as the original TUIkit (React + Ink) but
-runs on the Bun runtime instead of Node.js. Components are functional React
-components with hooks.
+This target uses React + Ink on the Node.js runtime. Components are functional
+React components with hooks. Uses npm for package management and vitest for
+testing.
 
 ```tsx
 import { Box, Text } from "ink";
@@ -86,7 +86,7 @@ Callbacks map directly to React props — no translation needed:
 
 ```tsx
 // Spec: onSelect: callback(item: SelectItem<T>) → void
-// Bun/Ink: Direct prop
+// Node/Ink: Direct prop
 interface SelectProps<T> {
     onSelect: (item: SelectItem<T>) => void;
 }
@@ -239,14 +239,13 @@ test("moves highlight down on arrow key", () => {
 | `escape` | `\x1B`          |
 | `ctrl+g` | `\x07`          |
 
-## Bun-specific notes
+## Node-specific notes
 
-- Bun natively supports TypeScript — no build step needed for development
-- Use `bun test` instead of `vitest` or `jest`
-- `bun:test` API is Jest-compatible: `describe`, `it`, `expect`, `beforeEach`
+- Use TypeScript with `tsx` or `ts-node` for execution without a build step
+- Use `vitest` for testing: `describe`, `it`, `expect`, `beforeEach`
 - ESM modules by default (`"type": "module"`)
-- Ink works on Bun without modification
-- Use `bun install` for dependency management
+- Ink works on Node.js without modification
+- Use `npm install` for dependency management
 
 ## Dependencies
 
@@ -260,7 +259,9 @@ test("moves highlight down on arrow key", () => {
     },
     "devDependencies": {
         "@types/react": "^18.0.0",
-        "ink-testing-library": "^4.0.0"
+        "ink-testing-library": "^4.0.0",
+        "vitest": "^3.0.0",
+        "tsx": "^4.0.0"
     }
 }
 ```
@@ -272,7 +273,7 @@ Every target must include a demo that renders all components interactively.
 ```yaml
 demo:
     entry: demo.tsx
-    run_command: "bun run demo.tsx"
+    run_command: "npx tsx demo.tsx"
 ```
 
 The demo app is a multi-screen Ink application. It shows a menu of available

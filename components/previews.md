@@ -92,12 +92,17 @@ This separation ensures:
 
 - **Content**: When no component is selected, show a centered placeholder
   message (e.g., `"Select a component to preview"`).
-- **Active preview**: When a component is opened, render all its `.preview.md`
-  variants stacked vertically, each with a **TextHeading** label showing the
-  variant name. If the content overflows, wrap it in a **ScrollBox**.
+- **Active preview**: When a component is opened, render its `.preview.md`
+  variants. If the content overflows, wrap it in a **ScrollBox**.
 - **Interactive previews**: Every variant MUST be a live, interactive instance.
   The `props` block defines **initial** props, not a static snapshot. Components
   MUST respond to keyboard input, update state, and re-render in real time.
+- **Variant navigation with TabBar**: When a component has multiple preview
+  variants, use a **TabBar** at the top of the preview panel with one tab per
+  variant. Only the active variant is mounted and receives keyboard focus.
+  This avoids the problem of multiple interactive instances competing for
+  input (e.g., two Select lists both capturing arrow keys). Switching tabs
+  unmounts the previous variant and mounts the new one with fresh initial props.
 
 ## Focus model
 
