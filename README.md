@@ -58,31 +58,12 @@ bun run compile lock --target go
 
 ```
 TUIKit/
-  .github/
-    workflows/
-      specs-ci.yml          CI workflow (lint, compile health, prompt smoke test)
-  components/
-    {Name}/
-      {Name}.md             Component spec
-      {Name}.test.md        Behavioral test spec
-      {Name}.preview.md     Preview/demo variants
-    previews.md             Demo app spec (all components together)
-  docs/
-    schema.md               Meta-spec — defines the format for all spec types
-  scripts/
-    compile.ts              Compiler CLI (status, prompt, lock, clean)
-    lint.ts                 Linter CLI
-    lint-rules.ts           Lint rule definitions, zod schemas, and config
-  targets/
-    go.md                   Go + Bubbletea target definition
-    bun.md                  Bun + Ink target definition
-    rust.md                 Rust + Ratatui target definition
-  tokens/
-    colors.md               Semantic color tokens
-    icons.md                Icon glyphs and semantic aliases
-    breakpoints.md          Responsive width thresholds
-  dist/                     Compiled output (gitignored)
-  package.json              Dependencies and scripts
+  components/       Component specs, tests, and preview definitions
+  tokens/           Semantic design tokens (colors, icons, breakpoints)
+  targets/          Target language/framework definitions
+  docs/             Meta-schema and design foundations
+  scripts/          Compiler and linter CLIs
+  dist/             Compiled output per target (gitignored)
 ```
 
 ## Writing specs
