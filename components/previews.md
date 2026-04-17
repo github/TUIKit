@@ -152,3 +152,86 @@ Before considering the demo complete, verify:
 9. HintBar updates to match the current focus state.
 10. `q` quits the app cleanly (restores terminal state).
 11. All styling uses semantic color tokens.
+12. All CLI subcommands below work correctly.
+
+## CLI interface
+
+The demo MUST support the following command-line flags in addition to the
+default interactive TUI mode. These enable automated testing by LLM agents
+and CI pipelines without requiring interactive PTY access.
+
+### Flags
+
+```
+(no flags)                          Launch full interactive TUI (default)
+--list                              Print all component/token names, one per line, then exit
+--component <Name>                  Open directly into that component's preview (skip sidebar)
+--component <Name> --variant <name> Render only the named variant
+--component <Name> --snapshot       Render one frame of all variants to stdout and exit
+--component <Name> --variant <name> --snapshot  Render one frame of a single variant and exit
+```
+
+### `--list`
+
+Print every available component and token name to stdout, one per line,
+sorted alphabetically (tokens first, then components). Exit with code 0.
+
+```
+breakpoints
+colors
+icons
+Dialog
+HintBar
+Input
+...
+```
+
+This lets agents discover what's available without launching the TUI.
+
+### `--component <Name>`
+
+Skip the sidebar and open directly into the named component's preview
+screen. The component renders in full-screen with all its variants, fully
+interactive. `Escape` or `q` exits the app (no sidebar to return to).
+
+The `<Name>` MUST match exactly (case-sensitive) one of the names from `--list`.
+If the name is not found, print an error message and exit with code 1.
+
+### `--variant <name>`
+
+Requires `--component`. Renders only the named variant (matching the
+`## heading` from the `.preview.md` file). If the variant name is not
+found, print an error to stderr and exit with code 1.
+
+### `--snapshot`
+
+Requires `--component`. Renders one frame of the component preview to
+stdout and exits immediately with code 0. Does NOT enter the alternate
+screen buffer or start the interactive event loop. The output is the
+exact same rendered text that the TUI would display — same code path,
+same token resolution, same layout — just captured as a single frame.
+
+This is the primary mechanism for automated testing: an agent can run
+`--component Select --snapshot` and inspect the output to verify correct
+rendering without needing to interact with a TUI.
+
+When combined with `--variant`, only that variant's frame is rendered.
+
+### Examples
+
+```bash
+# Bun
+bun run demo.tsx --list
+bun run demo.tsx --component Select
+bun run demo.tsx --component Select --variant "With current item"
+bun run demo.tsx --component Select --snapshot
+bun run demo.tsx --component HintBar --variant "Default hints" --snapshot
+
+# Go
+go run ./cmd/demo --list
+go run ./cmd/demo --component Select --snapshot
+
+# Rust
+cargo run --example demo -- --list
+cargo run --example demo -- --component Select --snapshot
+```
