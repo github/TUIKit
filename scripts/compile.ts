@@ -339,13 +339,17 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
     sections.push("---");
     sections.push("## Verification (REQUIRED)");
     sections.push("");
-    sections.push("After generating ALL files, you MUST:");
+    sections.push("After generating ALL files, you MUST verify in this order:");
     sections.push("");
-    sections.push("1. **Run tests**: Execute the target's test command and ensure ALL tests pass.");
+    sections.push("1. **Run unit tests**: Execute the target's test command and ensure ALL tests pass.");
     sections.push("   Fix any failures before proceeding.");
     sections.push("2. **Build the demo**: Compile/build the demo CLI and verify it starts without errors.");
-    sections.push("   For interpreted targets (Bun), verify the demo file has no syntax/import errors.");
-    sections.push("3. **Report**: State the final test count, pass/fail status, and demo build status.");
+    sections.push("3. **Verify demo --list**: Run the demo with `--list` and confirm all components/tokens appear.");
+    sections.push("4. **Verify demo --snapshot**: For EVERY component from `--list`, run");
+    sections.push("   `--component <Name> --snapshot` and confirm it exits 0 with non-empty output.");
+    sections.push("   If any snapshot fails, fix the demo wiring before continuing.");
+    sections.push("5. **Run demo smoke tests**: Execute the demo test file and ensure all snapshot tests pass.");
+    sections.push("6. **Report**: State the final unit test count, demo smoke test count, and pass/fail status.");
     sections.push("");
 
     return sections.join("\n");

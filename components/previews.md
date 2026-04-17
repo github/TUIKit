@@ -14,6 +14,33 @@ The demo is a **full-screen TUI** that takes over the alternate screen buffer.
 It uses a two-panel layout: a persistent sidebar on the left for component
 navigation, and a main panel on the right for the active component preview.
 
+### File structure
+
+The demo MUST be split into separate modules — not a single monolithic file.
+Recommended structure:
+
+```
+demo entrypoint         Main entry, CLI flag parsing, app bootstrap
+  preview/
+    registry            Component/token registry (names, variant definitions)
+    sidebar             Sidebar component (list, search, highlight, scroll)
+    preview_panel       Main panel (mounts/unmounts active component preview)
+    app                 Root app shell (layout, focus routing, HintBar)
+    cli                 CLI flag handlers (--list, --snapshot, --component)
+    variants/
+      tokens            Token preview renderers (colors grid, icons grid, etc.)
+      components        Component preview variant factories (read from registry)
+```
+
+Each preview variant factory creates a **live component instance** with initial
+props from the `.preview.md` spec. The registry maps component names to their
+variant factories.
+
+This separation ensures:
+- **Testability**: Each module can be tested independently
+- **Debuggability**: Bugs are isolated to specific modules, not buried in 1000+ lines
+- **Maintainability**: Adding a new component preview means adding to the registry, not editing a giant file
+
 ```
 ┌──────────────────────┬──────────────────────────────────────────┐
 │  TUIkit Preview      │                                          │
@@ -219,19 +246,29 @@ When combined with `--variant`, only that variant's frame is rendered.
 
 ### Examples
 
-```bash
-# Bun
-bun run demo.tsx --list
-bun run demo.tsx --component Select
-bun run demo.tsx --component Select --variant "With current item"
-bun run demo.tsx --component Select --snapshot
-bun run demo.tsx --component HintBar --variant "Default hints" --snapshot
+Use the target's run command (defined in `targets/{target}.md` under `demo.run_command`):
 
-# Go
-go run ./cmd/demo --list
-go run ./cmd/demo --component Select --snapshot
-
-# Rust
-cargo run --example demo -- --list
-cargo run --example demo -- --component Select --snapshot
 ```
+<run_command> --list
+<run_command> --component Select
+<run_command> --component Select --variant "With current item"
+<run_command> --component Select --snapshot
+<run_command> --component HintBar --variant "Default hints" --snapshot
+```
+
+### Demo smoke tests (REQUIRED)
+
+The demo MUST include automated tests that verify every component renders
+without errors via `--snapshot`. This is the integration test layer that
+catches wiring bugs (wrong init, broken update routing, missing imports)
+that unit tests miss.
+
+For each component/token listed by `--list`, the test:
+1. Runs `<run_command> --component <Name> --snapshot`
+2. Asserts exit code 0 (no panic, no crash)
+3. Asserts stdout is non-empty (something rendered)
+
+Implement this as a single parameterized or table-driven test in the
+target's test framework. The test should programmatically get the list
+of components (via `--list` or by reading the component registry), then
+loop over each one and run a snapshot assertion.
