@@ -121,6 +121,26 @@ schema hash changes (invalidating all entries).
 
 Token specs define shared design values consumed by all components.
 
+### Token providers
+
+Every token MUST be exposed at runtime through a **token provider** — the
+runtime layer between static token definitions and live component rendering.
+A token provider is a function, hook, method, or trait that resolves token
+values from the current environment (terminal width, color mode, theme).
+
+Components MUST consume tokens through providers, never as hardcoded values.
+Providers MUST recompute when their input context changes (e.g., terminal
+resize triggers breakpoint recalculation, theme change triggers color update).
+
+The provider pattern is idiomatic to each target:
+
+- **React/Ink**: Hooks (e.g., `useColors()`, `useBreakpoint()`) that
+  trigger re-renders when the environment changes.
+- **Go/Bubbletea**: Methods on the model or a context struct, updated
+  via messages (e.g., `WindowSizeMsg`).
+- **Rust/Ratatui**: Methods on a state struct or trait implementations
+  that read from shared application state.
+
 ### Frontmatter (required)
 
 ```yaml
@@ -620,7 +640,12 @@ selected_value: "B"
 
 Preview specs define how a component is showcased in the demo app. Each file
 lists named variants with their props — the demo app renders all variants for
-the selected component.
+the selected component as **fully interactive, live instances**.
+
+The `props` block defines **initial** props for the variant. It does NOT mean
+"render a static snapshot." Every variant MUST be a real, running component
+instance that responds to keyboard input, updates state, and re-renders in
+real time.
 
 ### Frontmatter (required)
 
@@ -658,10 +683,13 @@ separator: " | "
 Rules:
 
 - Each `## heading` names the variant (displayed as a label in the demo)
-- Each `props` block contains YAML props passed to the component
-- Variants render **top to bottom** in the demo screen
+- Each `props` block contains YAML **initial** props passed to the component
+- Every variant MUST be a live, interactive instance — not a static render
+- Variants render **top to bottom** in the main preview panel
 - For token previews, the `props` block contains display configuration
   (e.g., which token groups to show)
+- See `components/previews.md` for full demo app architecture (sidebar +
+  main panel layout, focus model, keyboard handling)
 - Preview specs MUST NOT duplicate test logic — they showcase visual
   surface area, not assert correctness
 

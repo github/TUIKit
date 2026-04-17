@@ -9,8 +9,8 @@
  * Usage:
  *   bun run compile status [--target <name>]
  *   bun run compile prompt --target <name> [--component <name>]
- *   bun run compile lock   --target <name> [--component <name>]
- *   bun run compile clean  --target <name>
+ *   bun run compile lock   --target <name> [--component <name>] | --all-targets
+ *   bun run compile clean  --target <name> | --all-targets
  */
 
 import { createHash } from "node:crypto";
@@ -72,11 +72,40 @@ function extractFrontmatter(content: string): Record<string, string> {
     const match = content.match(/^---\n([\s\S]*?)\n---/);
     if (!match) return {};
     const fm: Record<string, string> = {};
-    for (const line of match[1].split("\n")) {
+    const lines = match[1].split("\n");
+    let currentKey: string | null = null;
+    let currentValue = "";
+
+    for (const line of lines) {
+        // Indented line → either nested key (skip) or continuation of a folded scalar
+        if (line.match(/^\s+/) && line.trim().length > 0) {
+            if (currentKey && currentValue === ">") {
+                // Folded scalar continuation — take the first indented line as the value
+                fm[currentKey] = line.trim();
+                currentKey = null;
+                currentValue = "";
+            }
+            // Skip nested/indented keys (props, tokens, etc.)
+            continue;
+        }
+        // Top-level key
         const sep = line.indexOf(":");
         if (sep > 0) {
-            fm[line.slice(0, sep).trim()] = line.slice(sep + 1).trim();
+            // Save previous folded scalar if not yet resolved
+            if (currentKey && currentValue !== ">") {
+                fm[currentKey] = currentValue;
+            }
+            currentKey = line.slice(0, sep).trim();
+            currentValue = line.slice(sep + 1).trim();
+            if (currentValue !== ">") {
+                fm[currentKey] = currentValue;
+                currentKey = null;
+            }
         }
+    }
+    // Handle trailing folded scalar that was never resolved
+    if (currentKey && currentValue === ">") {
+        fm[currentKey] = "";
     }
     return fm;
 }
@@ -187,7 +216,6 @@ function computeDirty(specs: SpecEntry[], lock: LockFile | null, schemaHash: str
 // ── Prompt generation ──────────────────────────────────────────────────────
 
 function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[], distDir: string): string {
-    const schema = readFile(SCHEMA_PATH);
     const targetSpec = readFile(join(TARGETS_DIR, `${target}.md`));
 
     const tokenSpecs = allSpecs.filter((s) => s.kind === "token");
@@ -198,13 +226,17 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
     sections.push(`# TUIkit compilation prompt — target: ${target}`);
     sections.push("");
     sections.push("You are a TUIkit spec compiler. Generate idiomatic code for the target");
-    sections.push("framework based ONLY on the specs below. Do not reference any TypeScript source.");
+    sections.push("framework based on the specs referenced below.");
     sections.push("");
-
-    sections.push("---");
-    sections.push("## Meta-schema");
+    sections.push("This prompt is an **index** — it lists every spec with a summary and file");
+    sections.push("paths. Read the full spec files from disk before implementing each component.");
     sections.push("");
-    sections.push(schema);
+    sections.push("## Key reference files");
+    sections.push("");
+    sections.push("Read these files **first** to understand the spec format, design principles, and target framework:");
+    sections.push("");
+    sections.push(`- **Meta-schema** (spec format, frontmatter rules, compilation workflow): \`docs/schema.md\``);
+    sections.push(`- **Foundations** (color, typography, icons, layout, accessibility, keybinds): \`docs/foundations.md\``);
     sections.push("");
 
     sections.push("---");
@@ -216,40 +248,68 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
     sections.push("---");
     sections.push("## Token specs");
     sections.push("");
+    sections.push("Tokens define color, icon, and breakpoint values used across all components.");
+    sections.push("**Read the full file content from disk** before implementing each one.");
+    sections.push("");
+    sections.push("Each token MUST be implemented as a **token provider** — a runtime function,");
+    sections.push("hook, method, or trait that resolves token values from the current");
+    sections.push("environment (terminal width, color mode, theme) at runtime. Components");
+    sections.push("MUST consume tokens through these providers, never as hardcoded values.");
+    sections.push("Token providers are the runtime layer between static token definitions");
+    sections.push("and live component rendering.");
+    sections.push("");
+    sections.push("The provider pattern is idiomatic to each target. For example:");
+    sections.push("- **React/Ink**: `useColors()`, `useBreakpoint()` hooks that re-render on change.");
+    sections.push("- **Go/Bubbletea**: Methods on the model or a context struct updated via messages.");
+    sections.push("- **Rust/Ratatui**: Methods on a state struct or trait implementations.");
+    sections.push("");
+    sections.push("Providers MUST recompute when their input context changes (e.g., terminal");
+    sections.push("resize triggers breakpoint recalculation, theme change triggers color update).");
+    sections.push("");
     for (const token of tokenSpecs) {
-        sections.push(`### ${token.name}`);
+        const content = readFile(token.specPath);
+        const fm = extractFrontmatter(content);
+        const name = token.name.replace("tokens/", "");
+        const description = fm.description || "No description";
+
+        sections.push(`### ${name}`);
         sections.push("");
-        sections.push(readFile(token.specPath));
-        sections.push("");
+        sections.push(`- **Description**: ${description}`);
+        sections.push(`- **Spec**: \`${relative(SPECS_DIR, token.specPath)}\``);
         if (token.previewPath) {
-            sections.push(`### ${token.name} — preview`);
-            sections.push("");
-            sections.push(readFile(token.previewPath));
-            sections.push("");
+            sections.push(`- **Preview**: \`${relative(SPECS_DIR, token.previewPath)}\``);
         }
+        sections.push("");
     }
 
+    // Components as index — summary + file paths
     if (componentSpecs.length > 0) {
         sections.push("---");
-        sections.push("## Component specs to compile");
+        sections.push("## Components to compile");
         sections.push("");
+        sections.push("Each component lists its description, category, and file paths.");
+        sections.push("**Read the full file content from disk** before implementing each one.");
+        sections.push("");
+
         for (const comp of componentSpecs) {
-            sections.push(`### ${comp.name}`);
+            const content = readFile(comp.specPath);
+            const fm = extractFrontmatter(content);
+            const name = comp.name.replace("components/", "");
+            const description = fm.description || "No description";
+            const category = fm.category || "unknown";
+
+            sections.push(`### ${name}`);
             sections.push("");
-            sections.push(readFile(comp.specPath));
-            sections.push("");
+            sections.push(`- **Description**: ${description}`);
+            sections.push(`- **Category**: ${category}`);
+            sections.push(`- **Spec**: \`${relative(SPECS_DIR, comp.specPath)}\``);
             if (comp.testPath) {
-                sections.push(`### ${comp.name} — tests`);
-                sections.push("");
-                sections.push(readFile(comp.testPath));
-                sections.push("");
+                sections.push(`- **Tests**: \`${relative(SPECS_DIR, comp.testPath)}\``);
             }
             if (comp.previewPath) {
-                sections.push(`### ${comp.name} — preview`);
-                sections.push("");
-                sections.push(readFile(comp.previewPath));
-                sections.push("");
+                sections.push(`- **Preview**: \`${relative(SPECS_DIR, comp.previewPath)}\``);
             }
+            sections.push("");
         }
     }
 
@@ -259,10 +319,10 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
     sections.push("IMPORTANT: Do NOT spawn sub-agents or delegate to the task tool. Do ALL work yourself directly.");
     sections.push("");
     sections.push("1. Read the target definition to understand the framework and paradigm.");
-    sections.push("2. Implement each component spec above in the target language/framework.");
-    sections.push("3. Implement each test spec as runnable tests in the target's test framework.");
-    sections.push("4. Use the token specs for all color/icon/breakpoint references.");
-    sections.push("5. Use the preview specs to build per-component demo screens in the demo app.");
+    sections.push("2. For each component listed above, **read the full spec file** from disk, then implement it.");
+    sections.push("3. For each component with a test file, **read the test spec** and implement runnable tests.");
+    sections.push("4. For each component with a preview file, **read the preview spec** and build a demo screen.");
+    sections.push("5. For each token listed above, **read the full spec file** from disk, then implement it.");
     sections.push(`6. Output all files to: \`${relative(SPECS_DIR, join(distDir, target))}/\``);
     sections.push(`   This is the dist directory — keep all generated code here, separate from specs.`);
     sections.push("");
@@ -271,7 +331,8 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
         sections.push("---");
         sections.push("## Demo specification");
         sections.push("");
-        sections.push(readFile(DEMO_PATH));
+        sections.push("The demo app is an interactive component preview browser.");
+        sections.push(`Read the full spec before building the demo: \`${relative(SPECS_DIR, DEMO_PATH)}\``);
         sections.push("");
     }
 
@@ -311,9 +372,10 @@ function cmdStatus(targetFilter?: string): void {
         log(`${icon} ${chalk.bold(target)}: ${dirty.length > 0 ? chalk.yellow(`${dirty.length} dirty`) : chalk.green("0 dirty")}, ${locked} locked`);
 
         if (dirty.length > 0) {
+            const maxLen = Math.max(...dirty.map((d) => d.spec.name.length));
             for (const d of dirty) {
                 const tag = d.reason === "new" ? "NEW" : d.reason.toUpperCase();
-                log(`   ${chalk.dim("├─")} ${d.spec.name} ${chalk.dim(`[${tag}]`)}`);
+                log(`   ${chalk.dim("├─")} ${d.spec.name.padEnd(maxLen)} ${chalk.dim(`[${tag}]`)}`);
             }
             log(`   ${chalk.dim("└─")} ${chalk.cyan(`bun run compile prompt --target ${target}`)}`);
         }
@@ -355,8 +417,9 @@ function cmdPrompt(target: string, componentFilter?: string, distDir: string = D
     log(`   ${chalk.dim(`→ ${relative(SPECS_DIR, outPath)}`)}`);
     log("");
     log("Dirty specs included:");
+    const maxLen = Math.max(...dirty.map((d) => d.spec.name.length));
     for (const d of dirty) {
-        log(`   ${chalk.dim("├─")} ${d.spec.name} ${chalk.dim(`[${d.reason}]`)}`);
+        log(`   ${chalk.dim("├─")} ${d.spec.name.padEnd(maxLen)} ${chalk.dim(`[${d.reason}]`)}`);
     }
     log("");
     log("Feed this prompt to an LLM agent, then run:");
@@ -423,8 +486,11 @@ TUIkit spec compiler — detect changes, generate prompts, track state.
 Commands:
   status  [--target <name>]                    Show dirty/clean status
   prompt  --target <name> [--component <name>] Generate compilation prompt
+          --all-targets                        Generate prompts for all targets
   lock    --target <name> [--component <name>] Snapshot spec hashes to lock file
+          --all-targets                        Lock all targets
   clean   --target <name>                      Remove lock file + prompt
+          --all-targets                        Clean all targets
 
 Options:
   --out <dir>   Output directory for compiled code (default: specs/dist/)
@@ -439,15 +505,18 @@ Examples:
 `);
 }
 
-function parseArgs(argv: string[]): { command: string; target?: string; component?: string; out?: string } {
+function parseArgs(argv: string[]): { command: string; target?: string; allTargets: boolean; component?: string; out?: string } {
     const command = argv[0] || "status";
     let target: string | undefined;
+    let allTargets = false;
     let component: string | undefined;
     let out: string | undefined;
 
     for (let i = 1; i < argv.length; i++) {
         if (argv[i] === "--target" && argv[i + 1]) {
             target = argv[++i];
+        } else if (argv[i] === "--all-targets") {
+            allTargets = true;
         } else if (argv[i] === "--component" && argv[i + 1]) {
             component = argv[++i];
         } else if (argv[i] === "--out" && argv[i + 1]) {
@@ -455,36 +524,53 @@ function parseArgs(argv: string[]): { command: string; target?: string; componen
         }
     }
 
-    return { command, target, component, out };
+    return { command, target, allTargets, component, out };
 }
 
 const args = parseArgs(process.argv.slice(2));
 const distDir = args.out ? join(process.cwd(), args.out) : DEFAULT_DIST_DIR;
+const noSubcommand = process.argv.length <= 2;
 
 switch (args.command) {
     case "status":
+        if (noSubcommand) usage();
         cmdStatus(args.target);
         break;
     case "prompt":
-        if (!args.target) {
-            log("Error: --target is required for prompt command");
+        if (args.allTargets) {
+            for (const t of discoverTargets()) {
+                cmdPrompt(t, args.component, distDir);
+            }
+        } else if (args.target) {
+            cmdPrompt(args.target, args.component, distDir);
+        } else {
+            log("Error: --target <name> or --all-targets is required for prompt command");
             process.exit(1);
         }
-        cmdPrompt(args.target, args.component, distDir);
         break;
     case "lock":
-        if (!args.target) {
-            log("Error: --target is required for lock command");
+        if (args.allTargets) {
+            for (const t of discoverTargets()) {
+                cmdLock(t, args.component);
+            }
+        } else if (args.target) {
+            cmdLock(args.target, args.component);
+        } else {
+            log("Error: --target <name> or --all-targets is required for lock command");
             process.exit(1);
         }
-        cmdLock(args.target, args.component);
         break;
     case "clean":
-        if (!args.target) {
-            log("Error: --target is required for clean command");
+        if (args.allTargets) {
+            for (const t of discoverTargets()) {
+                cmdClean(t, distDir);
+            }
+        } else if (args.target) {
+            cmdClean(args.target, distDir);
+        } else {
+            log("Error: --target <name> or --all-targets is required for clean command");
             process.exit(1);
         }
-        cmdClean(args.target, distDir);
         break;
     case "help":
     case "--help":

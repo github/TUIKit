@@ -7,19 +7,12 @@ idiomatic implementations per target framework.
 
 ## How it works
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│  Spec files  │────▶│  compile.ts  │────▶│  LLM Agent      │
-│  (.md)       │     │  (prompt)    │     │  (compiler)     │
-└─────────────┘     └──────────────┘     └────────┬────────┘
-                                                  │
-                    ┌──────────────┐               │
-                    │  lock file   │◀──────────────┤
-                    │  (.json)     │               │
-                    └──────────────┘     ┌─────────▼────────┐
-                                         │  dist/{target}/   │
-                                         │  (generated code) │
-                                         └──────────────────┘
+```mermaid
+flowchart LR
+    Specs["Spec files\n(.md)"] --> Compile["compile.ts\n(prompt)"]
+    Compile --> Agent["LLM Agent\n(compiler)"]
+    Agent --> Dist["dist/{target}/\n(generated code)"]
+    Agent --> Lock["lock file\n(.json)"]
 ```
 
 1. **Specs** define behavior + semantic tokens (like headless UI libraries)
