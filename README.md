@@ -296,3 +296,7 @@ The GitHub Actions workflow (`.github/workflows/specs-ci.yml`) runs on every PR:
 - **Lock files enable incremental compilation** — only dirty specs trigger
   regeneration. Schema changes invalidate everything. Lock files are gitignored;
   a fresh clone starts with everything dirty.
+
+For TUI design foundations — color systems, typography, iconography, layout
+grids, accessibility patterns, keybinding conventions, and buffer management —
+see [`docs/foundations.md`](docs/foundations.md).
