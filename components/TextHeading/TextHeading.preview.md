@@ -7,12 +7,12 @@ version: 1
 ## Default
 
 ```props
-text: "Section Heading"
+children: "Section Heading"
 ```
 
 ## Error
 
 ```props
-text: "Error Details"
+children: "Error Details"
 type: error
 ```

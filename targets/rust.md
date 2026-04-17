@@ -2,7 +2,7 @@
 kind: target
 name: rust
 language: Rust
-runtime: rustc 1.75+ (2024 edition)
+runtime: rustc 1.85+ (2024 edition)
 framework:
     name: Ratatui
     version: ">=0.28"

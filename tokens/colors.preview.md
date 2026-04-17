@@ -13,7 +13,7 @@ groups: [text, background, status, brand, ui, diff, markdown]
 ## Text tokens
 
 ```props
-tokens: [textPrimary, textSecondary, textMuted, textDisabled, textOnBackground, textOnBackgroundSecondary]
+tokens: [textPrimary, textSecondary, textTertiary, textOnBackgroundSecondary]
 ```
 
 ## Status tokens

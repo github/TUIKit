@@ -7,7 +7,7 @@ category: input
 
 tokens:
   colors: [selected, statusSuccess, textSecondary, textTertiary]
-  icons: [iconSuccess]
+  icons: [iconSuccess, iconPrompt]
 
 types:
   SelectAutocompleteItem:
@@ -356,4 +356,5 @@ due to search input.
 | `textSecondary` | color     | Escape item suffix and no-results message | No       |
 | `textTertiary`  | color     | Search placeholder text                   | No       |
 | `iconSuccess`   | icon      | Current item marker glyph (✓)             | No       |
+| `iconPrompt`    | icon      | Highlighted item indicator (❯)            | Yes      |
 | `HintBar`       | component | Footer keyboard navigation hints          | No       |

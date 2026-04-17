@@ -7,12 +7,12 @@ version: 1
 ## Default
 
 ```props
-text: "Welcome to TUIkit"
+children: "Welcome to TUIkit"
 ```
 
 ## Error
 
 ```props
-text: "Something went wrong"
+children: "Something went wrong"
 type: error
 ```
