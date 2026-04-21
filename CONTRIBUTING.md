@@ -1,7 +1,7 @@
 ## Contributing
 
-[fork]: https://github.com/github/TUIKit/fork
-[pr]: https://github.com/github/TUIKit/compare
+[fork]: ../../fork
+[pr]: ../../compare
 
 Hi there! We're thrilled that you'd like to contribute to this project. Your help is essential for keeping it great.
 
@@ -11,22 +11,20 @@ Please note that this project is released with a [Contributor Code of Conduct](C
 
 ## Prerequisites
 
-- Swift 6.0 or later
-- macOS, Linux, or any platform supporting Swift
+- [Bun](https://bun.sh/) 1.1 or later
 
 ## Submitting a pull request
 
 1. [Fork][fork] and clone the repository
-1. Open the project in Xcode or your preferred Swift editor
-1. Make sure the tests pass on your machine: `swift test`
+1. Install the dependencies: `bun install`
+1. Make sure linting passes: `bun run lint`
 1. Create a new branch: `git checkout -b my-branch-name`
-1. Make your change, add tests, and make sure the tests still pass
+1. Make your change and make sure linting still passes
 1. Push to your fork and [submit a pull request][pr]
 1. Pat yourself on the back and wait for your pull request to be reviewed and merged.
 
 Here are a few things you can do that will increase the likelihood of your pull request being accepted:
 
-- Write tests.
 - Keep your change as focused as possible. If there are multiple changes you would like to make that are not dependent upon each other, consider submitting them as separate pull requests.
 - Write a [good commit message](http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html).
 
