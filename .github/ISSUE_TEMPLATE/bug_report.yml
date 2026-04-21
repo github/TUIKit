@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a problem with TUIKit
+labels: ["bug"]
+body:
+  - type: textarea
+    attributes:
+      label: Describe the bug
+      description: A clear description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Run command ...
+        2. See error ...
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: TUIKit version or commit
+      description: Which version or commit SHA are you using?
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: Any other context, screenshots, or logs.

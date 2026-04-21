@@ -300,3 +300,7 @@ The GitHub Actions workflow (`.github/workflows/specs-ci.yml`) runs on every PR:
 For TUI design foundations — color systems, typography, iconography, layout
 grids, accessibility patterns, keybinding conventions, and buffer management —
 see [`docs/foundations.md`](docs/foundations.md).
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
