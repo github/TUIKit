@@ -3,19 +3,21 @@
  * TUIkit spec compiler
  *
  * Detects changed specs via content hashing and generates self-contained
- * compilation prompts for LLM agents. Lock files track which spec versions
- * have been compiled per target.
+ * compilation prompts for LLM agents. The `build` command uses the Copilot SDK
+ * to launch an agent session that compiles specs into code automatically.
  *
  * Usage:
- *   bun run compile status [--target <name>]
- *   bun run compile prompt --target <name> [--component <name>]
- *   bun run compile lock   --target <name> [--component <name>] | --all-targets
- *   bun run compile clean  --target <name> | --all-targets
+ *   bun run compile status  [--target <name>]
+ *   bun run compile prompt  --target <name> [--component <name>]
+ *   bun run compile build   --target <name> [--component <name>] [--model <id>] [--effort <level>] [--verbose] [--no-lock]
+ *   bun run compile lock    --target <name> [--component <name>] | --all-targets
+ *   bun run compile clean   --target <name> | --all-targets
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { spawnSync } from "node:child_process";
 import chalk from "chalk";
 
 // biome-ignore lint/suspicious/noConsole: CLI tool — stdout is the interface
@@ -56,6 +58,26 @@ interface LockFile {
     schemaHash: string;
     updatedAt: string;
     entries: Record<string, LockEntry>;
+}
+
+type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+interface BuildConfig {
+    model: string;
+    effort: ReasoningEffort | undefined;
+    distDir: string;
+    supportsEffort: boolean;
+}
+
+interface CompileMetrics {
+    startTime: number;
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens: number;
+    toolCalls: number;
+    filesWritten: Set<string>;
+    lastAssistantMessage: string;
+    errors: string[];
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -355,6 +377,536 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
     return sections.join("\n");
 }
 
+// ── Gum helpers ────────────────────────────────────────────────────────────
+
+function hasGum(): boolean {
+    const result = spawnSync("gum", ["--version"], { stdio: "ignore" });
+    return result.error === undefined && result.status === 0;
+}
+
+function gum(args: string[], input?: string): string {
+    const result = spawnSync("gum", args, {
+        encoding: "utf-8",
+        stdio: [input ? "pipe" : "inherit", "pipe", "inherit"],
+        input,
+    });
+    return (result.stdout ?? "").trim();
+}
+
+function gumStyle(text: string, opts: Record<string, string | number> = {}): void {
+    const flags = Object.entries(opts).flatMap(([k, v]) => [`--${k}`, String(v)]);
+    spawnSync("gum", ["style", ...flags, text], { stdio: "inherit" });
+}
+
+function gumLog(level: string, msg: string): void {
+    spawnSync("gum", ["log", "--level", level, msg], { stdio: "inherit" });
+}
+
+// ── Build helpers ──────────────────────────────────────────────────────────
+
+function formatDuration(ms: number): string {
+    const secs = Math.floor(ms / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    const rem = secs % 60;
+    return `${mins}m ${rem}s`;
+}
+
+function scanOutput(dir: string): { files: number; lines: number } {
+    if (!existsSync(dir)) return { files: 0, lines: 0 };
+    let files = 0;
+    let lines = 0;
+
+    function walk(d: string): void {
+        for (const entry of readdirSync(d)) {
+            if (entry.startsWith(".") || entry.startsWith("_")) continue;
+            const p = join(d, entry);
+            if (statSync(p).isDirectory()) {
+                walk(p);
+            } else {
+                files++;
+                lines += readFileSync(p, "utf-8").split("\n").length;
+            }
+        }
+    }
+
+    walk(dir);
+    return { files, lines };
+}
+
+function summarizeArgs(args: unknown): string {
+    if (!args || typeof args !== "object") return "";
+    const obj = args as Record<string, unknown>;
+    const path = obj.path ?? obj.file_path ?? obj.command;
+    if (typeof path === "string") {
+        const short = path.length > 60 ? `…${path.slice(-57)}` : path;
+        return short;
+    }
+    return "";
+}
+
+function detectPhase(toolName: string, args: unknown): string {
+    const obj = (args ?? {}) as Record<string, unknown>;
+    const path = String(obj.path ?? obj.file_path ?? "");
+    const cmd = String(obj.command ?? "");
+
+    if (toolName === "read_file" || toolName === "view") {
+        if (path.includes("tokens/") || path.includes("components/") || path.includes("docs/")) {
+            return "Reading specs";
+        }
+        return "Reading files";
+    }
+    if (toolName === "edit_file" || toolName === "create_file" || toolName === "write_file") {
+        const match = path.match(/components\/(\w+)/);
+        if (match) return `Implementing ${match[1]}`;
+        if (path.includes("tokens/")) return "Implementing tokens";
+        if (path.includes("demo")) return "Building demo";
+        return "Writing files";
+    }
+    if (toolName === "bash" || toolName === "shell") {
+        if (cmd.includes("test")) return "Running tests";
+        if (cmd.includes("build") || cmd.includes("compile")) return "Building";
+        if (cmd.includes("run")) return "Running";
+        return "Executing command";
+    }
+    if (toolName === "glob" || toolName === "grep") return "Searching files";
+    return "Working";
+}
+
+// ── Build command ──────────────────────────────────────────────────────────
+
+async function ensureCopilotAuth(): Promise<import("@github/copilot-sdk").CopilotClient> {
+    const { CopilotClient } = await import("@github/copilot-sdk");
+    const client = new CopilotClient({ useLoggedInUser: true });
+
+    try {
+        await client.start();
+        await client.ping();
+    } catch (err) {
+        log(chalk.red("✗") + " Copilot authentication failed.\n");
+        log("  The build command requires a valid GitHub Copilot subscription.");
+        log("  Try one of:\n");
+        log(`    ${chalk.cyan("copilot auth login")}          Sign in via browser`);
+        log(`    ${chalk.cyan("export GITHUB_TOKEN=ghp_...")} Use a personal access token`);
+        log(`    ${chalk.cyan("export GH_TOKEN=ghp_...")}     GitHub CLI token\n`);
+        if (err instanceof Error) log(chalk.dim(`  Error: ${err.message}`));
+        process.exit(1);
+    }
+
+    return client;
+}
+
+async function pickModel(
+    client: import("@github/copilot-sdk").CopilotClient,
+    useGum: boolean,
+): Promise<{ id: string; name: string }> {
+    const models = await client.listModels();
+    if (models.length === 0) {
+        log(chalk.red("✗") + " No models available. Check your Copilot subscription.");
+        process.exit(1);
+    }
+
+    const defaultModel = models.find((m) => m.id === "claude-sonnet-4") ?? models[0];
+
+    if (!process.stdin.isTTY || !useGum) {
+        return { id: defaultModel.id, name: defaultModel.name };
+    }
+
+    const items = models.map((m) => `${m.name} (${m.id})`);
+    const selected = gum(
+        [
+            "choose",
+            "--header",
+            "Select model:",
+            "--selected",
+            `${defaultModel.name} (${defaultModel.id})`,
+            ...items,
+        ],
+    );
+
+    const match = selected.match(/\(([^)]+)\)$/);
+    const id = match?.[1] ?? defaultModel.id;
+    const model = models.find((m) => m.id === id) ?? defaultModel;
+    return { id: model.id, name: model.name };
+}
+
+async function pickEffort(useGum: boolean): Promise<ReasoningEffort> {
+    if (!process.stdin.isTTY || !useGum) return "high";
+
+    const result = gum(["choose", "--header", "Reasoning effort:", "--selected", "high", "low", "medium", "high", "xhigh"]);
+    if (["low", "medium", "high", "xhigh"].includes(result)) return result as ReasoningEffort;
+    return "high";
+}
+
+async function promptBuildConfig(
+    client: import("@github/copilot-sdk").CopilotClient,
+    flags: { model?: string; effort?: string; out?: string },
+): Promise<BuildConfig> {
+    const useGum = hasGum();
+    if (!useGum && process.stdin.isTTY) {
+        log(chalk.dim("  Tip: install gum for interactive prompts → brew install gum\n"));
+    }
+
+    // Fetch available models to validate and check capabilities
+    const models = await client.listModels();
+
+    let model: { id: string; name: string };
+    if (flags.model) {
+        const found = models.find((m) => m.id === flags.model);
+        if (!found) {
+            log(chalk.red("✗") + ` Model "${flags.model}" not found.`);
+            log(`  Available: ${models.map((m) => m.id).join(", ")}`);
+            process.exit(1);
+        }
+        model = { id: found.id, name: found.name };
+    } else {
+        model = await pickModel(client, useGum);
+    }
+
+    // Check if model supports reasoning effort
+    const modelInfo = models.find((m) => m.id === model.id);
+    const supportsEffort = !!(modelInfo?.supportedReasoningEfforts && modelInfo.supportedReasoningEfforts.length > 0);
+
+    let effort: ReasoningEffort | undefined;
+    if (supportsEffort) {
+        if (flags.effort && ["low", "medium", "high", "xhigh"].includes(flags.effort)) {
+            effort = flags.effort as ReasoningEffort;
+        } else {
+            effort = await pickEffort(useGum);
+        }
+    } else if (flags.effort) {
+        log(chalk.yellow("⚠") + ` Model "${model.id}" does not support reasoning effort — ignoring --effort flag.`);
+    }
+
+    return {
+        model: model.id,
+        effort,
+        distDir: flags.out ? join(process.cwd(), flags.out) : DEFAULT_DIST_DIR,
+        supportsEffort,
+    };
+}
+
+function printBuildHeader(target: string, config: BuildConfig, useGum: boolean): void {
+    const effortStr = config.effort ? ` · Effort: ${config.effort}` : "";
+    const header = [
+        `TUIkit compiler`,
+        `Target: ${target} · Model: ${config.model}`,
+        `${effortStr ? effortStr.slice(3) : ""}Output: ${relative(SPECS_DIR, config.distDir)}/${target}/`,
+    ].join("\n");
+
+    if (useGum) {
+        gumStyle(header, { border: "rounded", padding: "1 2", "border-foreground": "6" });
+    } else {
+        log(`\n${chalk.cyan("●")} ${chalk.bold("TUIkit compiler")}`);
+        log(`  Target: ${chalk.bold(target)} · Model: ${chalk.bold(config.model)}${effortStr}`);
+        log(`  Output: ${relative(SPECS_DIR, config.distDir)}/${target}/\n`);
+    }
+}
+
+function printSummary(
+    target: string,
+    config: BuildConfig,
+    metrics: CompileMetrics,
+    outDir: string,
+    useGum: boolean,
+    noLock: boolean,
+): void {
+    const elapsed = Date.now() - metrics.startTime;
+    const { files, lines } = scanOutput(outDir);
+    const totalTokens = metrics.inputTokens + metrics.outputTokens;
+
+    const tokenDetail =
+        `(${metrics.inputTokens.toLocaleString()} in / ${metrics.outputTokens.toLocaleString()} out` +
+        `${metrics.reasoningTokens ? ` / ${metrics.reasoningTokens.toLocaleString()} reasoning` : ""})`;
+
+    const body = [
+        `✓ Compilation complete — target: ${target}`,
+        ``,
+        `  Model:    ${config.model}${config.effort ? ` (${config.effort} effort)` : ""}`,
+        `  Time:     ${formatDuration(elapsed)}`,
+        `  Files:    ${files} written`,
+        `  LOC:      ~${lines.toLocaleString()} lines`,
+        `  Tokens:   ~${totalTokens.toLocaleString()} total ${tokenDetail}`,
+        `  Tools:    ${metrics.toolCalls} calls`,
+        ``,
+        `  Output:   ${relative(SPECS_DIR, outDir)}/`,
+        noLock ? `  Lock:     skipped (--no-lock)` : `  Lock:     ${relative(SPECS_DIR, lockPath(target))} updated`,
+    ].join("\n");
+
+    log("");
+    if (useGum) {
+        gumStyle(body, { border: "rounded", padding: "1 2", "border-foreground": "2" });
+    } else {
+        log(body);
+    }
+    log("");
+}
+
+async function cmdBuild(
+    target: string,
+    componentFilter?: string,
+    distDir: string = DEFAULT_DIST_DIR,
+    flagModel?: string,
+    flagEffort?: string,
+    verbose = false,
+    noLock = false,
+): Promise<void> {
+    const useGum = hasGum();
+    const { approveAll } = await import("@github/copilot-sdk");
+
+    // 1. Discover dirty specs
+    const specs = discoverSpecs();
+    const schemaHash = sha256(readFile(SCHEMA_PATH));
+    const lock = readLock(target);
+    let dirty = computeDirty(specs, lock, schemaHash);
+
+    if (componentFilter) {
+        dirty = dirty.filter(
+            (d) => d.spec.name === `components/${componentFilter}` || d.spec.name === `tokens/${componentFilter}`,
+        );
+    }
+
+    if (dirty.length === 0) {
+        log(`${chalk.green("✓")} No dirty specs for target "${target}". Nothing to compile.`);
+        return;
+    }
+
+    // 2. Generate prompt (reuse existing logic)
+    const dirtySpecs = dirty.map((d) => d.spec);
+    const prompt = generatePrompt(target, dirtySpecs, specs, distDir);
+    const outDir = join(distDir, target);
+    mkdirSync(outDir, { recursive: true });
+    const promptPath = join(outDir, "_compile-prompt.md");
+    writeFileSync(promptPath, prompt);
+
+    // 3. Auth
+    if (useGum) {
+        gumLog("info", "Authenticating with Copilot...");
+    } else {
+        log(chalk.dim("  Authenticating with Copilot..."));
+    }
+    const client = await ensureCopilotAuth();
+
+    // 4. Config (model/effort)
+    const config = await promptBuildConfig(client, {
+        model: flagModel,
+        effort: flagEffort,
+        out: distDir !== DEFAULT_DIST_DIR ? relative(process.cwd(), distDir) : undefined,
+    });
+
+    // 5. Print header
+    printBuildHeader(target, config, useGum);
+    log(`  ${chalk.dim(`${dirty.length} dirty specs to compile`)}\n`);
+
+    // 6. Metrics
+    const metrics: CompileMetrics = {
+        startTime: Date.now(),
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        toolCalls: 0,
+        filesWritten: new Set(),
+        lastAssistantMessage: "",
+        errors: [],
+    };
+
+    // 7. Create session
+    const sessionConfig: Record<string, unknown> = {
+        model: config.model,
+        onPermissionRequest: approveAll,
+        streaming: true,
+        systemMessage: {
+            content: `
+<compilation_context>
+You are a TUIkit spec compiler. Your job is to read component specifications
+and generate idiomatic code for the target framework.
+
+Working directory: ${SPECS_DIR}
+Output directory: ${relative(SPECS_DIR, outDir)}
+
+IMPORTANT:
+- Do NOT spawn sub-agents or delegate to the task tool. Do ALL work yourself directly.
+- Do NOT ask the user questions. Proceed with your best judgment.
+- Read ALL referenced spec files from disk before implementing.
+- Output all generated code to the specified output directory.
+- Run tests after implementation and fix any failures.
+</compilation_context>
+`,
+        },
+    };
+    if (config.effort && config.supportsEffort) {
+        sessionConfig.reasoningEffort = config.effort;
+    }
+
+    let session: Awaited<ReturnType<typeof client.createSession>>;
+    try {
+        // biome-ignore lint/suspicious/noExplicitAny: SDK config types are complex
+        session = await client.createSession(sessionConfig as any);
+    } catch (err) {
+        log(chalk.red("✗") + " Failed to create agent session.");
+        if (err instanceof Error) log(chalk.dim(`  Error: ${err.message}`));
+        log("\n  This could mean:");
+        log("    • The model is unavailable or unsupported");
+        log("    • Your Copilot subscription doesn't include this model");
+        log("    • A transient service error — try again\n");
+        await client.stop();
+        process.exit(1);
+    }
+
+    // 8. SIGINT handler
+    let aborted = false;
+    const sigintHandler = async () => {
+        if (aborted) return;
+        aborted = true;
+        log(chalk.yellow("\n\n⚠ Compilation interrupted"));
+        try {
+            await session.abort();
+            await session.disconnect();
+            await client.stop();
+        } catch {
+            /* best-effort cleanup */
+        }
+        process.exit(130);
+    };
+    process.on("SIGINT", sigintHandler);
+
+    // 9. Event handlers
+    let currentPhase = "Starting";
+
+    if (verbose) {
+        // ── Verbose mode: raw transcript ──
+        session.on("assistant.message_delta", (event) => {
+            process.stdout.write(event.data.deltaContent);
+        });
+
+        session.on("assistant.reasoning_delta", (event) => {
+            process.stdout.write(chalk.dim(event.data.deltaContent));
+        });
+
+        session.on("tool.execution_start", (event) => {
+            const { toolName } = event.data;
+            const argStr = summarizeArgs(event.data.arguments);
+            log(chalk.dim(`\n⚙ ${toolName}${argStr ? ` ${argStr}` : ""}`));
+        });
+
+        session.on("tool.execution_complete", (event) => {
+            const icon = event.data.success ? chalk.green("✓") : chalk.red("✗");
+            const toolId = event.data.toolCallId.slice(0, 8);
+            log(chalk.dim(`  ${icon} ${toolId}`));
+        });
+    } else {
+        // ── Normal mode: compact status ──
+        session.on("assistant.message_delta", () => {
+            // Suppress in normal mode — we show phase-level status instead
+        });
+
+        session.on("tool.execution_start", (event) => {
+            const { toolName } = event.data;
+            const argStr = summarizeArgs(event.data.arguments);
+            const phase = detectPhase(toolName, event.data.arguments);
+
+            if (phase !== currentPhase) {
+                // Complete previous phase
+                if (currentPhase !== "Starting") {
+                    if (useGum) {
+                        gumLog("info", `✓ ${currentPhase}`);
+                    } else {
+                        log(`  ${chalk.green("✓")} ${currentPhase}`);
+                    }
+                }
+                currentPhase = phase;
+            }
+
+            // Show current tool activity
+            if (useGum) {
+                gumLog("debug", `  ⚙ ${toolName}${argStr ? ` ${argStr}` : ""}`);
+            } else {
+                log(chalk.dim(`    ⚙ ${toolName}${argStr ? ` ${argStr}` : ""}`));
+            }
+        });
+    }
+
+    // Common event handlers for both modes
+    session.on("assistant.message", (event) => {
+        metrics.lastAssistantMessage = event.data.content;
+    });
+
+    session.on("assistant.usage", (event) => {
+        metrics.inputTokens += event.data.inputTokens ?? 0;
+        metrics.outputTokens += event.data.outputTokens ?? 0;
+        metrics.reasoningTokens += event.data.reasoningTokens ?? 0;
+    });
+
+    session.on("tool.execution_start", (event) => {
+        metrics.toolCalls++;
+        const { toolName } = event.data;
+        const args = event.data.arguments as Record<string, unknown> | undefined;
+        if (
+            (toolName === "edit_file" || toolName === "create_file" || toolName === "write_file") &&
+            args
+        ) {
+            const filePath = (args.path ?? args.file_path) as string | undefined;
+            if (filePath) metrics.filesWritten.add(filePath);
+        }
+    });
+
+    session.on("session.error", (event) => {
+        const msg = (event.data as { message?: string }).message ?? "Unknown error";
+        metrics.errors.push(msg);
+        if (verbose) {
+            log(chalk.red(`\n✗ Session error: ${msg}`));
+        } else {
+            if (useGum) {
+                gumLog("error", msg);
+            } else {
+                log(`  ${chalk.red("✗")} ${msg}`);
+            }
+        }
+    });
+
+    // 10. Send prompt and wait for idle
+    const done = new Promise<void>((resolve) => {
+        session.on("session.idle", () => resolve());
+    });
+
+    await session.send({ prompt });
+    await done;
+
+    // 11. Complete final phase in normal mode
+    if (!verbose && currentPhase !== "Starting") {
+        if (useGum) {
+            gumLog("info", `✓ ${currentPhase}`);
+        } else {
+            log(`  ${chalk.green("✓")} ${currentPhase}`);
+        }
+    }
+
+    // 12. Auto-lock (unless --no-lock or errors occurred)
+    if (!noLock && metrics.errors.length === 0) {
+        cmdLock(target, componentFilter);
+    }
+
+    // 13. Summary
+    printSummary(target, config, metrics, outDir, useGum, noLock);
+
+    if (metrics.errors.length > 0) {
+        log(chalk.yellow("⚠ Completed with errors:"));
+        for (const err of metrics.errors) {
+            log(`  ${chalk.red("•")} ${err}`);
+        }
+        log("");
+    }
+
+    // 14. Cleanup
+    try {
+        await session.disconnect();
+        await client.stop();
+    } catch {
+        /* best-effort */
+    }
+    process.removeListener("SIGINT", sigintHandler);
+}
+
 // ── Commands ───────────────────────────────────────────────────────────────
 
 function cmdStatus(targetFilter?: string): void {
@@ -485,36 +1037,62 @@ function cmdClean(target: string, distDir: string = DEFAULT_DIST_DIR): void {
 
 function usage(): void {
     log(`
-TUIkit spec compiler — detect changes, generate prompts, track state.
+TUIkit spec compiler — detect changes, generate prompts, compile via Copilot SDK.
 
 Commands:
   status  [--target <name>]                    Show dirty/clean status
   prompt  --target <name> [--component <name>] Generate compilation prompt
           --all-targets                        Generate prompts for all targets
+  build   --target <name> [--component <name>] Compile specs via Copilot SDK agent
+          --all-targets                        Build all targets sequentially
   lock    --target <name> [--component <name>] Snapshot spec hashes to lock file
           --all-targets                        Lock all targets
   clean   --target <name>                      Remove lock file + prompt
           --all-targets                        Clean all targets
 
-Options:
-  --out <dir>   Output directory for compiled code (default: specs/dist/)
+Build options:
+  --model <id>      Model to use (e.g. claude-sonnet-4, gpt-5). Prompts if omitted.
+  --effort <level>  Reasoning effort: low | medium | high | xhigh (default: high)
+  --verbose         Show full agent transcript (raw streaming output)
+  --no-lock         Skip auto-lock after successful build
+
+Common options:
+  --out <dir>       Output directory for compiled code (default: dist/)
 
 Examples:
   bun run compile status
   bun run compile prompt --target go
-  bun run compile prompt --target go --out ./my-tuikit
-  bun run compile prompt --target rust --component HintBar
+  bun run compile build --target go
+  bun run compile build --target rust --model claude-sonnet-4 --effort high --verbose
+  bun run compile build --target node --component HintBar
+  bun run compile build --all-targets --model gpt-5 --effort xhigh
   bun run compile lock --target go
   bun run compile clean --target bun
 `);
 }
 
-function parseArgs(argv: string[]): { command: string; target?: string; allTargets: boolean; component?: string; out?: string } {
+interface ParsedArgs {
+    command: string;
+    target?: string;
+    allTargets: boolean;
+    component?: string;
+    out?: string;
+    model?: string;
+    effort?: string;
+    verbose: boolean;
+    noLock: boolean;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
     const command = argv[0] || "status";
     let target: string | undefined;
     let allTargets = false;
     let component: string | undefined;
     let out: string | undefined;
+    let model: string | undefined;
+    let effort: string | undefined;
+    let verbose = false;
+    let noLock = false;
 
     for (let i = 1; i < argv.length; i++) {
         if (argv[i] === "--target" && argv[i + 1]) {
@@ -525,10 +1103,18 @@ function parseArgs(argv: string[]): { command: string; target?: string; allTarge
             component = argv[++i];
         } else if (argv[i] === "--out" && argv[i + 1]) {
             out = argv[++i];
+        } else if (argv[i] === "--model" && argv[i + 1]) {
+            model = argv[++i];
+        } else if (argv[i] === "--effort" && argv[i + 1]) {
+            effort = argv[++i];
+        } else if (argv[i] === "--verbose") {
+            verbose = true;
+        } else if (argv[i] === "--no-lock") {
+            noLock = true;
         }
     }
 
-    return { command, target, allTargets, component, out };
+    return { command, target, allTargets, component, out, model, effort, verbose, noLock };
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -549,6 +1135,18 @@ switch (args.command) {
             cmdPrompt(args.target, args.component, distDir);
         } else {
             log("Error: --target <name> or --all-targets is required for prompt command");
+            process.exit(1);
+        }
+        break;
+    case "build":
+        if (args.allTargets) {
+            for (const t of discoverTargets()) {
+                await cmdBuild(t, args.component, distDir, args.model, args.effort, args.verbose, args.noLock);
+            }
+        } else if (args.target) {
+            await cmdBuild(args.target, args.component, distDir, args.model, args.effort, args.verbose, args.noLock);
+        } else {
+            log("Error: --target <name> or --all-targets is required for build command");
             process.exit(1);
         }
         break;

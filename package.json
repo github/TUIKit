@@ -4,6 +4,7 @@
     "compile": "bun scripts/compile.ts"
   },
   "dependencies": {
+    "@github/copilot-sdk": "^0.3.0",
     "chalk": "^5.6.2",
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
