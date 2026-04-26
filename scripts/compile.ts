@@ -76,6 +76,7 @@ interface CompileMetrics {
     reasoningTokens: number;
     toolCalls: number;
     filesWritten: Set<string>;
+    filesDeleted: Set<string>;
     lastAssistantMessage: string;
     errors: string[];
 }
@@ -412,25 +413,15 @@ function formatDuration(ms: number): string {
     return `${mins}m ${rem}s`;
 }
 
-function scanOutput(dir: string): { files: number; lines: number } {
-    if (!existsSync(dir)) return { files: 0, lines: 0 };
-    let files = 0;
+/** Count LOC across files the agent actually wrote (ignores node_modules etc.) */
+function countAgentOutput(filesWritten: Set<string>): { files: number; lines: number } {
     let lines = 0;
-
-    function walk(d: string): void {
-        for (const entry of readdirSync(d)) {
-            if (entry.startsWith(".") || entry.startsWith("_")) continue;
-            const p = join(d, entry);
-            if (statSync(p).isDirectory()) {
-                walk(p);
-            } else {
-                files++;
-                lines += readFileSync(p, "utf-8").split("\n").length;
-            }
-        }
+    let files = 0;
+    for (const fp of filesWritten) {
+        if (!existsSync(fp)) continue;
+        files++;
+        lines += readFileSync(fp, "utf-8").split("\n").length;
     }
-
-    walk(dir);
     return { files, lines };
 }
 
@@ -632,7 +623,8 @@ function printSummary(
     passNumber = 1,
 ): void {
     const elapsed = Date.now() - metrics.startTime;
-    const { files, lines } = scanOutput(outDir);
+    const { files, lines } = countAgentOutput(metrics.filesWritten);
+    const deleted = metrics.filesDeleted.size;
     const totalTokens = metrics.inputTokens + metrics.outputTokens;
 
     const tokenDetail =
@@ -640,12 +632,13 @@ function printSummary(
         `${metrics.reasoningTokens ? ` / ${metrics.reasoningTokens.toLocaleString()} reasoning` : ""})`;
 
     const passLabel = passNumber > 1 ? ` (pass ${passNumber})` : "";
+    const filesLine = deleted > 0 ? `${files} written, ${deleted} deleted` : `${files} written`;
     const body = [
         `✓ Compilation complete — target: ${target}${passLabel}`,
         ``,
         `  Model:    ${config.model}${config.effort ? ` (${config.effort} effort)` : ""}`,
         `  Time:     ${formatDuration(elapsed)}`,
-        `  Files:    ${files} in output`,
+        `  Files:    ${filesLine}`,
         `  LOC:      ~${lines.toLocaleString()} lines`,
         `  Tokens:   ~${totalTokens.toLocaleString()} total ${tokenDetail}`,
         `  Tools:    ${metrics.toolCalls} calls`,
@@ -734,6 +727,7 @@ async function cmdBuild(
         reasoningTokens: 0,
         toolCalls: 0,
         filesWritten: new Set(),
+        filesDeleted: new Set(),
         lastAssistantMessage: "",
         errors: [],
     };
@@ -869,12 +863,17 @@ IMPORTANT:
         metrics.toolCalls++;
         const { toolName } = event.data;
         const args = event.data.arguments as Record<string, unknown> | undefined;
-        if (
-            (toolName === "edit_file" || toolName === "create_file" || toolName === "write_file") &&
-            args
-        ) {
+        if (args) {
             const filePath = (args.path ?? args.file_path) as string | undefined;
-            if (filePath) metrics.filesWritten.add(filePath);
+            if (
+                (toolName === "edit_file" || toolName === "create_file" || toolName === "write_file") &&
+                filePath
+            ) {
+                metrics.filesWritten.add(filePath);
+            } else if (toolName === "delete_file" && filePath) {
+                metrics.filesDeleted.add(filePath);
+                metrics.filesWritten.delete(filePath);
+            }
         }
     });
 
