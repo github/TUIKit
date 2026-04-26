@@ -499,6 +499,7 @@ async function ensureCopilotAuth(): Promise<import("@github/copilot-sdk").Copilo
 async function pickModel(
     client: import("@github/copilot-sdk").CopilotClient,
     useGum: boolean,
+    preselected?: string,
 ): Promise<{ id: string; name: string }> {
     const models = await client.listModels();
     if (models.length === 0) {
@@ -506,7 +507,10 @@ async function pickModel(
         process.exit(1);
     }
 
-    const defaultModel = models.find((m) => m.id === "claude-sonnet-4") ?? models[0];
+    const defaultModel =
+        (preselected ? models.find((m) => m.id === preselected) : undefined) ??
+        models.find((m) => m.id === "claude-sonnet-4") ??
+        models[0];
 
     if (!process.stdin.isTTY || !useGum) {
         return { id: defaultModel.id, name: defaultModel.name };
@@ -530,17 +534,35 @@ async function pickModel(
     return { id: model.id, name: model.name };
 }
 
-async function pickEffort(useGum: boolean): Promise<ReasoningEffort> {
-    if (!process.stdin.isTTY || !useGum) return "high";
+async function pickEffort(useGum: boolean, preselected?: string): Promise<ReasoningEffort> {
+    const defaultEffort = (preselected && ["low", "medium", "high", "xhigh"].includes(preselected))
+        ? preselected
+        : "high";
 
-    const result = gum(["choose", "--header", "Reasoning effort:", "--selected", "high", "low", "medium", "high", "xhigh"]);
+    if (!process.stdin.isTTY || !useGum) return defaultEffort as ReasoningEffort;
+
+    const result = gum(["choose", "--header", "Reasoning effort:", "--selected", defaultEffort, "low", "medium", "high", "xhigh"]);
     if (["low", "medium", "high", "xhigh"].includes(result)) return result as ReasoningEffort;
-    return "high";
+    return defaultEffort as ReasoningEffort;
+}
+
+async function pickOutputDir(useGum: boolean, target: string, preselected?: string): Promise<string> {
+    const defaultDir = preselected
+        ? join(process.cwd(), preselected)
+        : DEFAULT_DIST_DIR;
+    const displayDefault = relative(SPECS_DIR, defaultDir) || ".";
+
+    if (!process.stdin.isTTY || !useGum) return defaultDir;
+
+    const result = gum(["input", "--header", "Output directory:", "--value", displayDefault]);
+    if (!result || result === displayDefault) return defaultDir;
+    return join(SPECS_DIR, result);
 }
 
 async function promptBuildConfig(
     client: import("@github/copilot-sdk").CopilotClient,
     flags: { model?: string; effort?: string; out?: string },
+    target: string,
 ): Promise<BuildConfig> {
     const useGum = hasGum();
     if (!useGum && process.stdin.isTTY) {
@@ -550,40 +572,23 @@ async function promptBuildConfig(
     // Fetch available models to validate and check capabilities
     const models = await client.listModels();
 
-    let model: { id: string; name: string };
-    if (flags.model) {
-        const found = models.find((m) => m.id === flags.model);
-        if (!found) {
-            log(chalk.red("✗") + ` Model "${flags.model}" not found.`);
-            log(`  Available: ${models.map((m) => m.id).join(", ")}`);
-            process.exit(1);
-        }
-        model = { id: found.id, name: found.name };
-    } else {
-        model = await pickModel(client, useGum);
-    }
+    // Always prompt for model (flag value becomes the pre-selected default)
+    const model = await pickModel(client, useGum, flags.model);
 
     // Check if model supports reasoning effort
     const modelInfo = models.find((m) => m.id === model.id);
     const supportsEffort = !!(modelInfo?.supportedReasoningEfforts && modelInfo.supportedReasoningEfforts.length > 0);
 
+    // Always prompt for effort if model supports it (flag becomes default)
     let effort: ReasoningEffort | undefined;
     if (supportsEffort) {
-        if (flags.effort && ["low", "medium", "high", "xhigh"].includes(flags.effort)) {
-            effort = flags.effort as ReasoningEffort;
-        } else {
-            effort = await pickEffort(useGum);
-        }
-    } else if (flags.effort) {
-        log(chalk.yellow("⚠") + ` Model "${model.id}" does not support reasoning effort — ignoring --effort flag.`);
+        effort = await pickEffort(useGum, flags.effort);
     }
 
-    return {
-        model: model.id,
-        effort,
-        distDir: flags.out ? join(process.cwd(), flags.out) : DEFAULT_DIST_DIR,
-        supportsEffort,
-    };
+    // Always prompt for output location (flag or dist/ as default)
+    const distDir = await pickOutputDir(useGum, target, flags.out);
+
+    return { model: model.id, effort, distDir, supportsEffort };
 }
 
 function printBuildHeader(target: string, config: BuildConfig, useGum: boolean): void {
@@ -645,7 +650,7 @@ function printSummary(
 async function cmdBuild(
     target: string,
     componentFilter?: string,
-    distDir: string = DEFAULT_DIST_DIR,
+    _distDir: string = DEFAULT_DIST_DIR,
     flagModel?: string,
     flagEffort?: string,
     verbose = false,
@@ -654,7 +659,7 @@ async function cmdBuild(
     const useGum = hasGum();
     const { approveAll } = await import("@github/copilot-sdk");
 
-    // 1. Discover dirty specs
+    // 1. Quick check — any dirty specs at all?
     const specs = discoverSpecs();
     const schemaHash = sha256(readFile(SCHEMA_PATH));
     const lock = readLock(target);
@@ -671,15 +676,7 @@ async function cmdBuild(
         return;
     }
 
-    // 2. Generate prompt (reuse existing logic)
-    const dirtySpecs = dirty.map((d) => d.spec);
-    const prompt = generatePrompt(target, dirtySpecs, specs, distDir);
-    const outDir = join(distDir, target);
-    mkdirSync(outDir, { recursive: true });
-    const promptPath = join(outDir, "_compile-prompt.md");
-    writeFileSync(promptPath, prompt);
-
-    // 3. Auth
+    // 2. Auth first (fail fast before interactive prompts)
     if (useGum) {
         gumLog("info", "Authenticating with Copilot...");
     } else {
@@ -687,12 +684,26 @@ async function cmdBuild(
     }
     const client = await ensureCopilotAuth();
 
-    // 4. Config (model/effort)
-    const config = await promptBuildConfig(client, {
-        model: flagModel,
-        effort: flagEffort,
-        out: distDir !== DEFAULT_DIST_DIR ? relative(process.cwd(), distDir) : undefined,
-    });
+    // 3. Interactive config — always prompts with good defaults
+    //    Flags pre-select the default; user can still change it.
+    const config = await promptBuildConfig(
+        client,
+        {
+            model: flagModel,
+            effort: flagEffort,
+            out: _distDir !== DEFAULT_DIST_DIR ? relative(process.cwd(), _distDir) : undefined,
+        },
+        target,
+    );
+
+    // 4. Generate prompt (uses config.distDir chosen by the user)
+    const distDir = config.distDir;
+    const dirtySpecs = dirty.map((d) => d.spec);
+    const prompt = generatePrompt(target, dirtySpecs, specs, distDir);
+    const outDir = join(distDir, target);
+    mkdirSync(outDir, { recursive: true });
+    const promptPath = join(outDir, "_compile-prompt.md");
+    writeFileSync(promptPath, prompt);
 
     // 5. Print header
     printBuildHeader(target, config, useGum);
