@@ -399,10 +399,6 @@ function gumStyle(text: string, opts: Record<string, string | number> = {}): voi
     spawnSync("gum", ["style", ...flags, text], { stdio: "inherit" });
 }
 
-function gumLog(level: string, msg: string): void {
-    spawnSync("gum", ["log", "--level", level, msg], { stdio: "inherit" });
-}
-
 // ── Build helpers ──────────────────────────────────────────────────────────
 
 function formatDuration(ms: number): string {
@@ -688,11 +684,7 @@ async function cmdBuild(
     }
 
     // 2. Auth first (fail fast before interactive prompts)
-    if (useGum) {
-        gumLog("info", "Authenticating with Copilot...");
-    } else {
-        log(chalk.dim("  Authenticating with Copilot..."));
-    }
+    log(chalk.dim("  Authenticating with Copilot..."));
     const client = await ensureCopilotAuth();
 
     // 3. Interactive config — always prompts with good defaults
@@ -831,21 +823,13 @@ IMPORTANT:
             if (phase !== currentPhase) {
                 // Complete previous phase
                 if (currentPhase !== "Starting") {
-                    if (useGum) {
-                        gumLog("info", `✓ ${currentPhase}`);
-                    } else {
-                        log(`  ${chalk.green("✓")} ${currentPhase}`);
-                    }
+                    log(`  ${chalk.green("✓")} ${currentPhase}`);
                 }
                 currentPhase = phase;
             }
 
             // Show current tool activity
-            if (useGum) {
-                gumLog("debug", `  ⚙ ${toolName}${argStr ? ` ${argStr}` : ""}`);
-            } else {
-                log(chalk.dim(`    ⚙ ${toolName}${argStr ? ` ${argStr}` : ""}`));
-            }
+            log(chalk.dim(`    ⚙ ${toolName}${argStr ? ` ${argStr}` : ""}`));
         });
     }
 
@@ -884,11 +868,7 @@ IMPORTANT:
         if (verbose) {
             log(chalk.red(`\n✗ Session error: ${msg}`));
         } else {
-            if (useGum) {
-                gumLog("error", msg);
-            } else {
-                log(`  ${chalk.red("✗")} ${msg}`);
-            }
+            log(`  ${chalk.red("✗")} ${msg}`);
         }
     });
 
@@ -908,11 +888,7 @@ IMPORTANT:
 
     // Complete final phase in normal mode
     if (!verbose && currentPhase !== "Starting") {
-        if (useGum) {
-            gumLog("info", `✓ ${currentPhase}`);
-        } else {
-            log(`  ${chalk.green("✓")} ${currentPhase}`);
-        }
+        log(`  ${chalk.green("✓")} ${currentPhase}`);
     }
 
     // Show summary for this pass
@@ -968,11 +944,7 @@ IMPORTANT:
 
         // Complete final phase
         if (!verbose && currentPhase !== "Starting") {
-            if (useGum) {
-                gumLog("info", `✓ ${currentPhase}`);
-            } else {
-                log(`  ${chalk.green("✓")} ${currentPhase}`);
-            }
+            log(`  ${chalk.green("✓")} ${currentPhase}`);
         }
 
         printSummary(target, config, metrics, outDir, useGum, noLock, passNumber);
