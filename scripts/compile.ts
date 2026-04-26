@@ -683,6 +683,7 @@ async function cmdBuild(
 
     if (dirty.length === 0) {
         log(`${chalk.green("✓")} No dirty specs for target "${target}". Nothing to compile.`);
+        log(`  ${chalk.dim(`Lock: ${relative(SPECS_DIR, lockPath(target))}`)}`);
         return;
     }
 
@@ -1050,6 +1051,7 @@ function cmdPrompt(target: string, componentFilter?: string, distDir: string = D
 
     if (dirty.length === 0) {
         log(`${chalk.green("✓")} No dirty specs for target "${target}".`);
+        log(`  ${chalk.dim(`Lock: ${relative(SPECS_DIR, lockPath(target))}`)}`);
         return;
     }
 
