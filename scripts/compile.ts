@@ -434,29 +434,31 @@ function summarizeArgs(args: unknown): string {
 
 function detectPhase(toolName: string, args: unknown): string {
     const obj = (args ?? {}) as Record<string, unknown>;
-    const path = String(obj.path ?? obj.file_path ?? "");
+    const path = String(obj.path ?? obj.file_path ?? obj.filePath ?? obj.file ?? "");
     const cmd = String(obj.command ?? "");
+    const tn = toolName.toLowerCase();
 
-    if (toolName === "read_file" || toolName === "view") {
+    if (tn.includes("read") || tn === "view") {
         if (path.includes("tokens/") || path.includes("components/") || path.includes("docs/")) {
             return "Reading specs";
         }
         return "Reading files";
     }
-    if (toolName === "edit_file" || toolName === "create_file" || toolName === "write_file") {
+    if (tn.includes("edit") || tn.includes("create") || tn.includes("write")) {
         const match = path.match(/components\/(\w+)/);
         if (match) return `Implementing ${match[1]}`;
         if (path.includes("tokens/")) return "Implementing tokens";
         if (path.includes("demo")) return "Building demo";
         return "Writing files";
     }
-    if (toolName === "bash" || toolName === "shell") {
+    if (tn === "bash" || tn === "shell" || tn.includes("terminal") || tn.includes("command")) {
         if (cmd.includes("test")) return "Running tests";
         if (cmd.includes("build") || cmd.includes("compile")) return "Building";
         if (cmd.includes("run")) return "Running";
         return "Executing command";
     }
-    if (toolName === "glob" || toolName === "grep") return "Searching files";
+    if (tn === "glob" || tn === "grep" || tn.includes("search") || tn.includes("find")) return "Searching files";
+    if (tn.includes("delete")) return "Cleaning up";
     return "Working";
 }
 
@@ -849,15 +851,27 @@ IMPORTANT:
         const { toolName } = event.data;
         const args = event.data.arguments as Record<string, unknown> | undefined;
         if (args) {
-            const filePath = (args.path ?? args.file_path) as string | undefined;
-            if (
-                (toolName === "edit_file" || toolName === "create_file" || toolName === "write_file") &&
-                filePath
-            ) {
-                metrics.filesWritten.add(filePath);
-            } else if (toolName === "delete_file" && filePath) {
+            const filePath = (args.path ?? args.file_path ?? args.filePath ?? args.file) as string | undefined;
+            const isWrite =
+                toolName === "edit_file" ||
+                toolName === "create_file" ||
+                toolName === "write_file" ||
+                toolName === "create" ||
+                toolName === "edit" ||
+                toolName === "write" ||
+                toolName === "write_to_file" ||
+                toolName === "str_replace_editor" ||
+                toolName === "insert_edit_into_file" ||
+                toolName.includes("edit") ||
+                toolName.includes("create") ||
+                toolName.includes("write");
+            const isDelete = toolName === "delete_file" || toolName === "delete" || toolName.includes("delete");
+
+            if (isDelete && filePath) {
                 metrics.filesDeleted.add(filePath);
                 metrics.filesWritten.delete(filePath);
+            } else if (isWrite && filePath) {
+                metrics.filesWritten.add(filePath);
             }
         }
     });
