@@ -475,6 +475,20 @@ function detectPhase(toolName: string, args: unknown): string {
 
 // ── Build command ──────────────────────────────────────────────────────────
 
+function confirmPass(): Promise<boolean> {
+    return new Promise((resolve) => {
+        const rl = require("node:readline").createInterface({
+            input: process.stdin,
+            output: process.stdout,
+        });
+        rl.question(`\n  Do another pass? ${chalk.dim("[Y/n]")} `, (answer: string) => {
+            rl.close();
+            const a = answer.trim().toLowerCase();
+            resolve(a === "" || a === "y" || a === "yes");
+        });
+    });
+}
+
 async function ensureCopilotAuth(): Promise<import("@github/copilot-sdk").CopilotClient> {
     const { CopilotClient } = await import("@github/copilot-sdk");
     const client = new CopilotClient({ useLoggedInUser: true });
@@ -615,6 +629,7 @@ function printSummary(
     outDir: string,
     useGum: boolean,
     noLock: boolean,
+    passNumber = 1,
 ): void {
     const elapsed = Date.now() - metrics.startTime;
     const { files, lines } = scanOutput(outDir);
@@ -624,15 +639,17 @@ function printSummary(
         `(${metrics.inputTokens.toLocaleString()} in / ${metrics.outputTokens.toLocaleString()} out` +
         `${metrics.reasoningTokens ? ` / ${metrics.reasoningTokens.toLocaleString()} reasoning` : ""})`;
 
+    const passLabel = passNumber > 1 ? ` (pass ${passNumber})` : "";
     const body = [
-        `✓ Compilation complete — target: ${target}`,
+        `✓ Compilation complete — target: ${target}${passLabel}`,
         ``,
         `  Model:    ${config.model}${config.effort ? ` (${config.effort} effort)` : ""}`,
         `  Time:     ${formatDuration(elapsed)}`,
-        `  Files:    ${files} written`,
+        `  Files:    ${files} in output`,
         `  LOC:      ~${lines.toLocaleString()} lines`,
         `  Tokens:   ~${totalTokens.toLocaleString()} total ${tokenDetail}`,
         `  Tools:    ${metrics.toolCalls} calls`,
+        `  Passes:   ${passNumber}`,
         ``,
         `  Output:   ${relative(SPECS_DIR, outDir)}/`,
         noLock ? `  Lock:     skipped (--no-lock)` : `  Lock:     ${relative(SPECS_DIR, lockPath(target))} updated`,
@@ -875,15 +892,21 @@ IMPORTANT:
         }
     });
 
-    // 10. Send prompt and wait for idle
-    const done = new Promise<void>((resolve) => {
-        session.on("session.idle", () => resolve());
-    });
+    // 10. Send prompt and wait for idle — with multi-pass loop
+    let passNumber = 1;
+
+    const waitForIdle = (): Promise<void> =>
+        new Promise<void>((resolve) => {
+            const unsub = session.on("session.idle", () => {
+                unsub();
+                resolve();
+            });
+        });
 
     await session.send({ prompt });
-    await done;
+    await waitForIdle();
 
-    // 11. Complete final phase in normal mode
+    // Complete final phase in normal mode
     if (!verbose && currentPhase !== "Starting") {
         if (useGum) {
             gumLog("info", `✓ ${currentPhase}`);
@@ -892,13 +915,8 @@ IMPORTANT:
         }
     }
 
-    // 12. Auto-lock (unless --no-lock or errors occurred)
-    if (!noLock && metrics.errors.length === 0) {
-        cmdLock(target, componentFilter);
-    }
-
-    // 13. Summary
-    printSummary(target, config, metrics, outDir, useGum, noLock);
+    // Show summary for this pass
+    printSummary(target, config, metrics, outDir, useGum, noLock, passNumber);
 
     if (metrics.errors.length > 0) {
         log(chalk.yellow("⚠ Completed with errors:"));
@@ -908,7 +926,72 @@ IMPORTANT:
         log("");
     }
 
-    // 14. Cleanup
+    // 11. Multi-pass loop — offer to do another pass
+    while (process.stdin.isTTY && !aborted) {
+        let wantMore: boolean;
+        if (useGum) {
+            const r = spawnSync("gum", ["confirm", "--default=yes", "Do another pass? (improves consistency)"], { stdio: "inherit" });
+            wantMore = r.status === 0;
+        } else {
+            wantMore = await confirmPass();
+        }
+
+        if (!wantMore) break;
+
+        passNumber++;
+        currentPhase = "Starting";
+        // Reset per-pass metrics (keep cumulative totals)
+        const prevTokensIn = metrics.inputTokens;
+        const prevTokensOut = metrics.outputTokens;
+        const prevReasoning = metrics.reasoningTokens;
+        const prevToolCalls = metrics.toolCalls;
+        metrics.errors = [];
+
+        log(`\n${chalk.cyan("●")} Pass ${passNumber} — sending improvement prompt...\n`);
+
+        await session.send({
+            prompt: [
+                "Do another pass over the compilation output.",
+                "Re-read the original spec files and the compile prompt at " +
+                    `\`${relative(SPECS_DIR, promptPath)}\` to check what you may have missed.`,
+                "Focus on:",
+                "- Missing or incomplete component implementations",
+                "- Tests that are failing or missing",
+                "- Inconsistencies between the spec and the generated code",
+                "- Demo wiring for any new components",
+                "- Token usage correctness",
+                "After fixing, run the tests again and report results.",
+            ].join("\n"),
+        });
+
+        await waitForIdle();
+
+        // Complete final phase
+        if (!verbose && currentPhase !== "Starting") {
+            if (useGum) {
+                gumLog("info", `✓ ${currentPhase}`);
+            } else {
+                log(`  ${chalk.green("✓")} ${currentPhase}`);
+            }
+        }
+
+        printSummary(target, config, metrics, outDir, useGum, noLock, passNumber);
+
+        if (metrics.errors.length > 0) {
+            log(chalk.yellow("⚠ Pass completed with errors:"));
+            for (const err of metrics.errors) {
+                log(`  ${chalk.red("•")} ${err}`);
+            }
+            log("");
+        }
+    }
+
+    // 12. Auto-lock (unless --no-lock or errors occurred)
+    if (!noLock && metrics.errors.length === 0) {
+        cmdLock(target, componentFilter);
+    }
+
+    // 13. Cleanup
     try {
         await session.disconnect();
         await client.stop();
