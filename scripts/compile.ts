@@ -346,7 +346,7 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
     sections.push("3. For each component with a test file, **read the test spec** and implement runnable tests.");
     sections.push("4. For each component with a preview file, **read the preview spec** and build a demo screen.");
     sections.push("5. For each token listed above, **read the full spec file** from disk, then implement it.");
-    sections.push(`6. Output all files to: \`${relative(SPECS_DIR, join(distDir, target))}/\``);
+    sections.push(`6. Output all files to: \`${relative(SPECS_DIR, distDir)}/\``);
     sections.push(`   This is the dist directory — keep all generated code here, separate from specs.`);
     sections.push("");
 
@@ -552,7 +552,7 @@ async function pickEffort(useGum: boolean, preselected?: string): Promise<Reason
 async function pickOutputDir(useGum: boolean, target: string, preselected?: string): Promise<string> {
     const defaultDir = preselected
         ? join(process.cwd(), preselected)
-        : DEFAULT_DIST_DIR;
+        : join(DEFAULT_DIST_DIR, target);
     const displayDefault = relative(SPECS_DIR, defaultDir) || ".";
 
     if (!process.stdin.isTTY || !useGum) return defaultDir;
@@ -599,7 +599,7 @@ function printBuildHeader(target: string, config: BuildConfig, useGum: boolean):
     const header = [
         `TUIkit compiler`,
         `Target: ${target} · Model: ${config.model}`,
-        `${effortStr ? effortStr.slice(3) : ""}Output: ${relative(SPECS_DIR, config.distDir)}/${target}/`,
+        `${effortStr ? effortStr.slice(3) : ""}Output: ${relative(SPECS_DIR, config.distDir)}/`,
     ].join("\n");
 
     if (useGum) {
@@ -607,7 +607,7 @@ function printBuildHeader(target: string, config: BuildConfig, useGum: boolean):
     } else {
         log(`\n${chalk.cyan("●")} ${chalk.bold("TUIkit compiler")}`);
         log(`  Target: ${chalk.bold(target)} · Model: ${chalk.bold(config.model)}${effortStr}`);
-        log(`  Output: ${relative(SPECS_DIR, config.distDir)}/${target}/\n`);
+        log(`  Output: ${relative(SPECS_DIR, config.distDir)}/\n`);
     }
 }
 
@@ -705,7 +705,7 @@ async function cmdBuild(
     const distDir = config.distDir;
     const dirtySpecs = dirty.map((d) => d.spec);
     const prompt = generatePrompt(target, dirtySpecs, specs, distDir);
-    const outDir = join(distDir, target);
+    const outDir = distDir;
     mkdirSync(outDir, { recursive: true });
     const promptPath = join(outDir, "_compile-prompt.md");
     writeFileSync(promptPath, prompt);
@@ -1042,10 +1042,10 @@ function cmdPrompt(target: string, componentFilter?: string, distDir: string = D
     }
 
     const dirtySpecs = dirty.map((d) => d.spec);
-    const prompt = generatePrompt(target, dirtySpecs, specs, distDir);
+    const outDir = join(distDir, target);
+    const prompt = generatePrompt(target, dirtySpecs, specs, outDir);
 
     // Write prompt to dist directory
-    const outDir = join(distDir, target);
     mkdirSync(outDir, { recursive: true });
     const outPath = join(outDir, "_compile-prompt.md");
     writeFileSync(outPath, prompt);
