@@ -27,6 +27,7 @@ flowchart LR
 ### Prerequisites
 
 - [Bun](https://bun.sh/) 1.1+ installed (`bun --version`)
+- A [GitHub Copilot](https://github.com/features/copilot) subscription (for the `compile build` command)
 
 ### Install dependencies
 

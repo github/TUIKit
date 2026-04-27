@@ -4,6 +4,7 @@
     "compile": "bun scripts/compile.ts"
   },
   "dependencies": {
+    "@clack/prompts": "^1.2.0",
     "@github/copilot-sdk": "^0.3.0",
     "chalk": "^5.6.2",
     "fast-glob": "^3.3.3",

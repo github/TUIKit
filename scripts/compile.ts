@@ -17,8 +17,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { spawnSync } from "node:child_process";
 import chalk from "chalk";
+import * as clack from "@clack/prompts";
 
 // biome-ignore lint/suspicious/noConsole: CLI tool — stdout is the interface
 const log = (...args: unknown[]) => console.log(...args);
@@ -378,27 +378,6 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
     return sections.join("\n");
 }
 
-// ── Gum helpers ────────────────────────────────────────────────────────────
-
-function hasGum(): boolean {
-    const result = spawnSync("gum", ["--version"], { stdio: "ignore" });
-    return result.error === undefined && result.status === 0;
-}
-
-function gum(args: string[], input?: string): string {
-    const result = spawnSync("gum", args, {
-        encoding: "utf-8",
-        stdio: [input ? "pipe" : "inherit", "pipe", "inherit"],
-        input,
-    });
-    return (result.stdout ?? "").trim();
-}
-
-function gumStyle(text: string, opts: Record<string, string | number> = {}): void {
-    const flags = Object.entries(opts).flatMap(([k, v]) => [`--${k}`, String(v)]);
-    spawnSync("gum", ["style", ...flags, text], { stdio: "inherit" });
-}
-
 // ── Build helpers ──────────────────────────────────────────────────────────
 
 function formatDuration(ms: number): string {
@@ -464,18 +443,13 @@ function detectPhase(toolName: string, args: unknown): string {
 
 // ── Build command ──────────────────────────────────────────────────────────
 
-function confirmPass(): Promise<boolean> {
-    return new Promise((resolve) => {
-        const rl = require("node:readline").createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-        rl.question(`\n  Do another pass? ${chalk.dim("[Y/n]")} `, (answer: string) => {
-            rl.close();
-            const a = answer.trim().toLowerCase();
-            resolve(a === "" || a === "y" || a === "yes");
-        });
+async function confirmPass(): Promise<boolean> {
+    const result = await clack.confirm({
+        message: "Do another pass? (improves consistency)",
+        initialValue: true,
     });
+    if (clack.isCancel(result)) return false;
+    return result;
 }
 
 async function ensureCopilotAuth(): Promise<import("@github/copilot-sdk").CopilotClient> {
@@ -501,7 +475,6 @@ async function ensureCopilotAuth(): Promise<import("@github/copilot-sdk").Copilo
 
 async function pickModel(
     client: import("@github/copilot-sdk").CopilotClient,
-    useGum: boolean,
     preselected?: string,
 ): Promise<{ id: string; name: string }> {
     const models = await client.listModels();
@@ -515,49 +488,69 @@ async function pickModel(
         models.find((m) => m.id === "claude-sonnet-4") ??
         models[0];
 
-    if (!process.stdin.isTTY || !useGum) {
+    if (!process.stdin.isTTY) {
         return { id: defaultModel.id, name: defaultModel.name };
     }
 
-    const items = models.map((m) => `${m.name} (${m.id})`);
-    const selected = gum(
-        [
-            "choose",
-            "--header",
-            "Select model:",
-            "--selected",
-            `${defaultModel.name} (${defaultModel.id})`,
-            ...items,
-        ],
-    );
+    const result = await clack.select({
+        message: "Select model:",
+        options: models.map((m) => ({ value: m.id, label: `${m.name} (${m.id})` })),
+        initialValue: defaultModel.id,
+    });
 
-    const match = selected.match(/\(([^)]+)\)$/);
-    const id = match?.[1] ?? defaultModel.id;
-    const model = models.find((m) => m.id === id) ?? defaultModel;
+    if (clack.isCancel(result)) {
+        clack.cancel("Build cancelled.");
+        process.exit(0);
+    }
+
+    const model = models.find((m) => m.id === result) ?? defaultModel;
     return { id: model.id, name: model.name };
 }
 
-async function pickEffort(useGum: boolean, preselected?: string): Promise<ReasoningEffort> {
+async function pickEffort(preselected?: string): Promise<ReasoningEffort> {
     const defaultEffort = (preselected && ["low", "medium", "high", "xhigh"].includes(preselected))
         ? preselected
         : "high";
 
-    if (!process.stdin.isTTY || !useGum) return defaultEffort as ReasoningEffort;
+    if (!process.stdin.isTTY) return defaultEffort as ReasoningEffort;
 
-    const result = gum(["choose", "--header", "Reasoning effort:", "--selected", defaultEffort, "low", "medium", "high", "xhigh"]);
-    if (["low", "medium", "high", "xhigh"].includes(result)) return result as ReasoningEffort;
-    return defaultEffort as ReasoningEffort;
+    const result = await clack.select({
+        message: "Reasoning effort:",
+        options: [
+            { value: "low", label: "low" },
+            { value: "medium", label: "medium" },
+            { value: "high", label: "high" },
+            { value: "xhigh", label: "xhigh" },
+        ],
+        initialValue: defaultEffort,
+    });
+
+    if (clack.isCancel(result)) {
+        clack.cancel("Build cancelled.");
+        process.exit(0);
+    }
+
+    return result as ReasoningEffort;
 }
 
-async function pickOutputDir(useGum: boolean, target: string, preselected?: string): Promise<string> {
+async function pickOutputDir(target: string, preselected?: string): Promise<string> {
     const defaultDir = preselected
         ? join(process.cwd(), preselected)
         : join(DEFAULT_DIST_DIR, target);
     const displayDefault = relative(SPECS_DIR, defaultDir) || ".";
 
-    if (!process.stdin.isTTY || !useGum) return defaultDir;
+    if (!process.stdin.isTTY) return defaultDir;
 
-    const result = gum(["input", "--header", "Output directory:", "--value", displayDefault]);
+    const result = await clack.text({
+        message: "Output directory:",
+        initialValue: displayDefault,
+    });
+
+    if (clack.isCancel(result)) {
+        clack.cancel("Build cancelled.");
+        process.exit(0);
+    }
+
     if (!result || result === displayDefault) return defaultDir;
     return join(SPECS_DIR, result);
 }
@@ -567,16 +560,13 @@ async function promptBuildConfig(
     flags: { model?: string; effort?: string; out?: string },
     target: string,
 ): Promise<BuildConfig> {
-    const useGum = hasGum();
-    if (!useGum && process.stdin.isTTY) {
-        log(chalk.dim("  Tip: install gum for interactive prompts → brew install gum\n"));
-    }
+    clack.intro(chalk.cyan("TUIkit compiler"));
 
     // Fetch available models to validate and check capabilities
     const models = await client.listModels();
 
     // Always prompt for model (flag value becomes the pre-selected default)
-    const model = await pickModel(client, useGum, flags.model);
+    const model = await pickModel(client, flags.model);
 
     // Check if model supports reasoning effort
     const modelInfo = models.find((m) => m.id === model.id);
@@ -585,30 +575,20 @@ async function promptBuildConfig(
     // Always prompt for effort if model supports it (flag becomes default)
     let effort: ReasoningEffort | undefined;
     if (supportsEffort) {
-        effort = await pickEffort(useGum, flags.effort);
+        effort = await pickEffort(flags.effort);
     }
 
     // Always prompt for output location (flag or dist/ as default)
-    const distDir = await pickOutputDir(useGum, target, flags.out);
+    const distDir = await pickOutputDir(target, flags.out);
 
     return { model: model.id, effort, distDir, supportsEffort };
 }
 
-function printBuildHeader(target: string, config: BuildConfig, useGum: boolean): void {
+function printBuildHeader(target: string, config: BuildConfig): void {
     const effortStr = config.effort ? ` · Effort: ${config.effort}` : "";
-    const header = [
-        `TUIkit compiler`,
-        `Target: ${target} · Model: ${config.model}`,
-        `${effortStr ? effortStr.slice(3) : ""}Output: ${relative(SPECS_DIR, config.distDir)}/`,
-    ].join("\n");
-
-    if (useGum) {
-        gumStyle(header, { border: "rounded", padding: "1 2", "border-foreground": "6" });
-    } else {
-        log(`\n${chalk.cyan("●")} ${chalk.bold("TUIkit compiler")}`);
-        log(`  Target: ${chalk.bold(target)} · Model: ${chalk.bold(config.model)}${effortStr}`);
-        log(`  Output: ${relative(SPECS_DIR, config.distDir)}/\n`);
-    }
+    log(`\n${chalk.cyan("●")} ${chalk.bold("TUIkit compiler")}`);
+    log(`  Target: ${chalk.bold(target)} · Model: ${chalk.bold(config.model)}${effortStr}`);
+    log(`  Output: ${relative(SPECS_DIR, config.distDir)}/\n`);
 }
 
 function printSummary(
@@ -616,7 +596,6 @@ function printSummary(
     config: BuildConfig,
     metrics: CompileMetrics,
     outDir: string,
-    useGum: boolean,
     noLock: boolean,
     passNumber = 1,
 ): void {
@@ -632,7 +611,7 @@ function printSummary(
     const passLabel = passNumber > 1 ? ` (pass ${passNumber})` : "";
     const filesLine = deleted > 0 ? `${files} written, ${deleted} deleted` : `${files} written`;
     const body = [
-        `✓ Compilation complete — target: ${target}${passLabel}`,
+        `${chalk.green("✓")} Compilation complete — target: ${target}${passLabel}`,
         ``,
         `  Model:    ${config.model}${config.effort ? ` (${config.effort} effort)` : ""}`,
         `  Time:     ${formatDuration(elapsed)}`,
@@ -647,11 +626,7 @@ function printSummary(
     ].join("\n");
 
     log("");
-    if (useGum) {
-        gumStyle(body, { border: "rounded", padding: "1 2", "border-foreground": "2" });
-    } else {
-        log(body);
-    }
+    log(body);
     log("");
 }
 
@@ -664,7 +639,6 @@ async function cmdBuild(
     verbose = false,
     noLock = false,
 ): Promise<void> {
-    const useGum = hasGum();
     const { approveAll } = await import("@github/copilot-sdk");
 
     // 1. Quick check — any dirty specs at all?
@@ -711,7 +685,7 @@ async function cmdBuild(
     writeFileSync(promptPath, prompt);
 
     // 5. Print header
-    printBuildHeader(target, config, useGum);
+    printBuildHeader(target, config);
     log(`  ${chalk.dim(`${dirty.length} dirty specs to compile`)}\n`);
 
     // 6. Metrics
@@ -906,7 +880,7 @@ IMPORTANT:
     }
 
     // Show summary for this pass
-    printSummary(target, config, metrics, outDir, useGum, noLock, passNumber);
+    printSummary(target, config, metrics, outDir, noLock, passNumber);
 
     if (metrics.errors.length > 0) {
         log(chalk.yellow("⚠ Completed with errors:"));
@@ -918,13 +892,7 @@ IMPORTANT:
 
     // 11. Multi-pass loop — offer to do another pass
     while (process.stdin.isTTY && !aborted) {
-        let wantMore: boolean;
-        if (useGum) {
-            const r = spawnSync("gum", ["confirm", "--default=yes", "Do another pass? (improves consistency)"], { stdio: "inherit" });
-            wantMore = r.status === 0;
-        } else {
-            wantMore = await confirmPass();
-        }
+        const wantMore = await confirmPass();
 
         if (!wantMore) break;
 
@@ -961,7 +929,7 @@ IMPORTANT:
             log(`  ${chalk.green("✓")} ${currentPhase}`);
         }
 
-        printSummary(target, config, metrics, outDir, useGum, noLock, passNumber);
+        printSummary(target, config, metrics, outDir, noLock, passNumber);
 
         if (metrics.errors.length > 0) {
             log(chalk.yellow("⚠ Pass completed with errors:"));
