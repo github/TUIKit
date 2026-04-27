@@ -803,7 +803,7 @@ IMPORTANT:
         session.on("tool.execution_start", (event) => {
             const { toolName } = event.data;
             const argStr = summarizeArgs(event.data.arguments);
-            log(chalk.dim(`\n⚙ ${toolName}${argStr ? ` ${argStr}` : ""}`));
+            log(chalk.dim(`\n  ${toolName}${argStr ? ` ${argStr}` : ""}`));
         });
 
         session.on("tool.execution_complete", (event) => {
@@ -831,7 +831,7 @@ IMPORTANT:
             }
 
             // Show current tool activity
-            log(chalk.dim(`    ⚙ ${toolName}${argStr ? ` ${argStr}` : ""}`));
+            log(chalk.dim(`    ${toolName}${argStr ? ` ${argStr}` : ""}`));
         });
     }
 
