@@ -760,6 +760,14 @@ RULES:
 - The interactive demo (--interactive) is the PRIMARY deliverable, not an afterthought.
 - Run tests after EACH component and fix any failures before moving on.
 
+DEPENDENCIES & KNOWLEDGE CUTOFF:
+Your training data may be outdated. Before assuming a library doesn't exist or
+falling back to self-contained polyfills, you MUST use web browsing / fetch to
+check the library's actual npm registry page, GitHub repo, or documentation.
+Install the real package if it exists. Only polyfill if you've confirmed the
+package genuinely isn't published. This applies to ALL dependencies referenced
+in the target spec (e.g., @opentui/*, ink, bubbletea crates, etc.).
+
 MULTI-PASS APPROACH:
 This session may receive multiple passes. At the END of each pass, you MUST
 include a clear summary of what was accomplished and what remains. Structure
