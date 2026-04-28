@@ -341,37 +341,61 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
     sections.push("");
     sections.push("IMPORTANT: Do NOT spawn sub-agents or delegate to the task tool. Do ALL work yourself directly.");
     sections.push("");
+    sections.push("### Philosophy: depth over breadth");
+    sections.push("");
+    sections.push("It is MUCH better to have a few components that work perfectly — with full");
+    sections.push("interactivity, passing tests, and a working interactive demo — than many");
+    sections.push("components that are half-baked. Each component you implement must be");
+    sections.push("**complete and polished** before moving to the next one.");
+    sections.push("");
+    sections.push("### Workflow");
+    sections.push("");
     sections.push("1. Read the target definition to understand the framework and paradigm.");
-    sections.push("2. For each component listed above, **read the full spec file** from disk, then implement it.");
-    sections.push("3. For each component with a test file, **read the test spec** and implement runnable tests.");
-    sections.push("4. For each component with a preview file, **read the preview spec** and build a demo screen.");
-    sections.push("5. For each token listed above, **read the full spec file** from disk, then implement it.");
-    sections.push(`6. Output all files to: \`${relative(SPECS_DIR, distDir)}/\``);
+    sections.push("2. Implement all **tokens first** — read each token spec from disk, implement it.");
+    sections.push("3. Then implement components **one at a time, fully**, in this order:");
+    sections.push("   a. Read the full spec file from disk.");
+    sections.push("   b. Implement the component with all variants and interactions.");
+    sections.push("   c. Read the test spec and implement runnable tests. Run them — they must pass.");
+    sections.push("   d. Wire the component into the interactive demo (see below).");
+    sections.push("   e. Verify the component works in the demo with `--component <Name> --snapshot`.");
+    sections.push("   f. Only then move to the next component.");
+    sections.push(`4. Output all files to: \`${relative(SPECS_DIR, distDir)}/\``);
     sections.push(`   This is the dist directory — keep all generated code here, separate from specs.`);
     sections.push("");
 
     if (existsSync(DEMO_PATH)) {
         sections.push("---");
-        sections.push("## Demo specification");
+        sections.push("## Demo specification — INTERACTIVE PLAYGROUND (required)");
         sections.push("");
-        sections.push("The demo app is an interactive component preview browser.");
-        sections.push(`Read the full spec before building the demo: \`${relative(SPECS_DIR, DEMO_PATH)}\``);
+        sections.push("The demo is NOT a static listing. It is a **fully interactive playground**");
+        sections.push("where you can navigate between components and interact with live instances.");
+        sections.push(`Read the full spec: \`${relative(SPECS_DIR, DEMO_PATH)}\``);
+        sections.push("");
+        sections.push("Key requirements:");
+        sections.push("- `--interactive` MUST launch a full-screen TUI with sidebar + preview panel.");
+        sections.push("- Every previewed component MUST be a live, interactive instance (e.g., you can");
+        sections.push("  type in an Input, navigate a Select, scroll a ScrollBox).");
+        sections.push("- Implement the interactive mode **from the first component** — do not leave it");
+        sections.push("  as a stub. It's better to have 3 components in a working playground than");
+        sections.push("  10 components with `--interactive` not implemented.");
+        sections.push("- `--list` and `--snapshot` modes are secondary — they must work, but the");
+        sections.push("  interactive playground is the primary output.");
         sections.push("");
     }
 
     sections.push("---");
     sections.push("## Verification (REQUIRED)");
     sections.push("");
-    sections.push("After generating ALL files, you MUST verify in this order:");
+    sections.push("After implementing each component (not just at the end), verify:");
     sections.push("");
-    sections.push("1. **Run unit tests**: Execute the target's test command and ensure ALL tests pass.");
-    sections.push("   Fix any failures before proceeding.");
-    sections.push("2. **Build the demo**: Compile/build the demo CLI and verify it starts without errors.");
-    sections.push("3. **Verify demo --list**: Run the demo with `--list` and confirm all components/tokens appear.");
-    sections.push("4. **Verify demo --snapshot**: For EVERY component from `--list`, run");
-    sections.push("   `--component <Name> --snapshot` and confirm it exits 0 with non-empty output.");
-    sections.push("   If any snapshot fails, fix the demo wiring before continuing.");
-    sections.push("5. **Run demo smoke tests**: Execute the demo test file and ensure all snapshot tests pass.");
+    sections.push("1. **Unit tests pass**: Run the target's test command for that component.");
+    sections.push("2. **Demo snapshot works**: `--component <Name> --snapshot` exits 0 with output.");
+    sections.push("3. **Interactive demo works**: `--interactive` launches and the component is navigable.");
+    sections.push("");
+    sections.push("After ALL components are done:");
+    sections.push("");
+    sections.push("4. **Full test suite**: Run all tests, ensure everything passes.");
+    sections.push("5. **Demo smoke tests**: Run the demo test file, all snapshots pass.");
     sections.push("6. **Report**: State the final unit test count, demo smoke test count, and pass/fail status.");
     sections.push("");
 
@@ -715,12 +739,21 @@ and generate idiomatic code for the target framework.
 Working directory: ${SPECS_DIR}
 Output directory: ${relative(SPECS_DIR, outDir)}
 
-IMPORTANT:
+PHILOSOPHY: Depth over breadth.
+It is far better to deliver a few components that are fully complete —
+with passing tests and working interactive demo — than many components
+that are half-implemented. Completeness means: the component renders
+correctly, responds to user input, is wired into the interactive
+playground, and all tests pass.
+
+RULES:
 - Do NOT spawn sub-agents or delegate to the task tool. Do ALL work yourself directly.
 - Do NOT ask the user questions. Proceed with your best judgment.
 - Read ALL referenced spec files from disk before implementing.
 - Output all generated code to the specified output directory.
-- Run tests after implementation and fix any failures.
+- Implement one component at a time, fully, before starting the next.
+- The interactive demo (--interactive) is the PRIMARY deliverable, not an afterthought.
+- Run tests after EACH component and fix any failures before moving on.
 </compilation_context>
 `,
         },
@@ -918,13 +951,17 @@ IMPORTANT:
                 "Do another pass over the compilation output.",
                 "Re-read the original spec files and the compile prompt at " +
                     `\`${relative(SPECS_DIR, promptPath)}\` to check what you may have missed.`,
+                "",
+                "Remember: DEPTH OVER BREADTH. A few components working perfectly",
+                "(with interactive demo) is better than many half-working ones.",
+                "",
                 "Focus on:",
-                "- Missing or incomplete component implementations",
+                "- The interactive demo (`--interactive`) — it MUST work as a full-screen playground",
+                "- Components already implemented: polish, fix bugs, ensure full interactivity",
                 "- Tests that are failing or missing",
-                "- Inconsistencies between the spec and the generated code",
-                "- Demo wiring for any new components",
+                "- Add the NEXT component (fully: implementation + tests + demo wiring)",
                 "- Token usage correctness",
-                "After fixing, run the tests again and report results.",
+                "After fixing, run the tests and verify `--interactive` works, then report results.",
             ].join("\n"),
         });
 
