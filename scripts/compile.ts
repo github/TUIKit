@@ -19,6 +19,11 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { dirname, join, relative } from "node:path";
 import chalk from "chalk";
 import * as clack from "@clack/prompts";
+import { marked } from "marked";
+import { markedTerminal } from "marked-terminal";
+import boxen from "boxen";
+
+marked.use(markedTerminal());
 
 // biome-ignore lint/suspicious/noConsole: CLI tool — stdout is the interface
 const log = (...args: unknown[]) => console.log(...args);
@@ -914,8 +919,8 @@ RULES:
 
     // Show the agent's last message as a pass recap
     if (metrics.lastAssistantMessage) {
-        log(`\n  Agent finished:`);
-        log(`    ${chalk.dim(metrics.lastAssistantMessage.trim())}`);
+        const rendered = marked(metrics.lastAssistantMessage.trim()) as string;
+        log(`\n${boxen(rendered.trimEnd(), { padding: 1, dimBorder: true, title: "Agent summary", titleAlignment: "left" })}`);
     }
 
     // Show summary for this pass
@@ -974,8 +979,8 @@ RULES:
 
         // Show the agent's last message as a pass recap
         if (metrics.lastAssistantMessage) {
-            log(`\n  Agent finished:`);
-            log(`    ${chalk.dim(metrics.lastAssistantMessage.trim())}`);
+            const rendered = marked(metrics.lastAssistantMessage.trim()) as string;
+            log(`\n${boxen(rendered.trimEnd(), { padding: 1, dimBorder: true, title: "Agent summary", titleAlignment: "left" })}`);
         }
 
         printSummary(target, config, metrics, outDir, noLock, passNumber);
