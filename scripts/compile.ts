@@ -759,6 +759,21 @@ RULES:
 - Implement one component at a time, fully, before starting the next.
 - The interactive demo (--interactive) is the PRIMARY deliverable, not an afterthought.
 - Run tests after EACH component and fix any failures before moving on.
+
+MULTI-PASS APPROACH:
+This session may receive multiple passes. At the END of each pass, you MUST
+include a clear summary of what was accomplished and what remains. Structure
+your final message like this:
+
+## Pass summary
+- What was completed (components, tests, demo wiring)
+- Current test results (X passing, Y failing)
+- Interactive demo status
+
+## Next pass priorities
+- List specific components or work items that should be tackled next
+- Note any known issues or failing tests to fix
+- If everything is complete, say so explicitly
 </compilation_context>
 `,
         },
