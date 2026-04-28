@@ -879,6 +879,12 @@ IMPORTANT:
         log(`  ${chalk.green("✓")} ${currentPhase}`);
     }
 
+    // Show the agent's last message as a pass recap
+    if (metrics.lastAssistantMessage) {
+        log(`\n  Agent finished:`);
+        log(`    ${chalk.dim(metrics.lastAssistantMessage.trim())}`);
+    }
+
     // Show summary for this pass
     printSummary(target, config, metrics, outDir, noLock, passNumber);
 
@@ -927,6 +933,12 @@ IMPORTANT:
         // Complete final phase
         if (!verbose && currentPhase !== "Starting") {
             log(`  ${chalk.green("✓")} ${currentPhase}`);
+        }
+
+        // Show the agent's last message as a pass recap
+        if (metrics.lastAssistantMessage) {
+            log(`\n  Agent finished:`);
+            log(`    ${chalk.dim(metrics.lastAssistantMessage.trim())}`);
         }
 
         printSummary(target, config, metrics, outDir, noLock, passNumber);
