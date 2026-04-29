@@ -760,6 +760,14 @@ RULES:
 - The interactive demo (--interactive) is the PRIMARY deliverable, not an afterthought.
 - Run tests after EACH component and fix any failures before moving on.
 
+LOCKING COMPLETED COMPONENTS:
+After you fully complete a component (implementation + tests passing + demo wired),
+lock it by running:
+  bun run compile lock --target ${target} --component <Name>
+This records the component as compiled so it won't be recompiled in future runs.
+Only lock a component when you are confident it is DONE — tests pass, demo works.
+Lock tokens the same way: bun run compile lock --target ${target} --component <token-name>
+
 DEPENDENCIES & KNOWLEDGE CUTOFF:
 Your training data may be outdated. Before assuming a library doesn't exist or
 falling back to self-contained polyfills, you MUST use web browsing / fetch to
@@ -957,12 +965,6 @@ your final message like this:
         log("");
     }
 
-    // Lock after pass 1 to bank completed work
-    if (!noLock && metrics.errors.length === 0) {
-        cmdLock(target, componentFilter);
-        log(chalk.dim(`  Lock updated after pass ${passNumber}\n`));
-    }
-
     // 11. Multi-pass loop — offer to do another pass
     while (process.stdin.isTTY && !aborted) {
         const wantMore = await confirmPass();
@@ -1020,12 +1022,6 @@ your final message like this:
                 log(`  ${chalk.red("•")} ${err}`);
             }
             log("");
-        }
-
-        // Lock after each pass to bank completed work
-        if (!noLock && metrics.errors.length === 0) {
-            cmdLock(target, componentFilter);
-            log(chalk.dim(`  Lock updated after pass ${passNumber}\n`));
         }
     }
 
