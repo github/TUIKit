@@ -272,6 +272,36 @@ bun run compile build --target go --out dist/go-experimental
 # The prompt and generated code go directly to dist/go-experimental/
 ```
 
+### Generating prompts manually
+
+If you prefer to feed the prompt to an external agent (Claude, ChatGPT, Copilot
+Chat, etc.) instead of using `compile build`, use the `prompt` command:
+
+```bash
+# Generate a prompt for a target
+bun run compile prompt --target go
+
+# Generate for a single component
+bun run compile prompt --target bun --component Select
+
+# Generate to a custom directory
+bun run compile prompt --target node --out ~/my-project
+```
+
+The prompt is written to `<out>/_compile-prompt.md`. It contains:
+
+- The target definition (framework, paradigm, file structure)
+- An index of all dirty specs with file paths and summaries
+- Instructions for the agent (depth-first, verification steps)
+- Demo specification reference
+
+Feed this file to any LLM agent, then lock manually once verified:
+
+```bash
+# After the agent generates code and tests pass:
+bun run compile lock --target go
+```
+
 ### Adding a new target
 
 1. Create `targets/{name}.md` following the target spec format in `docs/schema.md`
