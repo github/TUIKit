@@ -957,6 +957,12 @@ your final message like this:
         log("");
     }
 
+    // Lock after pass 1 to bank completed work
+    if (!noLock && metrics.errors.length === 0) {
+        cmdLock(target, componentFilter);
+        log(chalk.dim(`  Lock updated after pass ${passNumber}\n`));
+    }
+
     // 11. Multi-pass loop — offer to do another pass
     while (process.stdin.isTTY && !aborted) {
         const wantMore = await confirmPass();
@@ -1015,14 +1021,15 @@ your final message like this:
             }
             log("");
         }
+
+        // Lock after each pass to bank completed work
+        if (!noLock && metrics.errors.length === 0) {
+            cmdLock(target, componentFilter);
+            log(chalk.dim(`  Lock updated after pass ${passNumber}\n`));
+        }
     }
 
-    // 12. Auto-lock (unless --no-lock or errors occurred)
-    if (!noLock && metrics.errors.length === 0) {
-        cmdLock(target, componentFilter);
-    }
-
-    // 13. Cleanup
+    // 12. Cleanup
     try {
         await session.disconnect();
         await client.stop();
