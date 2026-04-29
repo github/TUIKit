@@ -9,7 +9,7 @@
  * Usage:
  *   bun run compile status  [--target <name>]
  *   bun run compile prompt  --target <name> [--component <name>]
- *   bun run compile build   --target <name> [--component <name>] [--model <id>] [--effort <level>] [--verbose] [--no-lock]
+ *   bun run compile build   --target <name> [--component <name>] [--model <id>] [--effort <level>] [--verbose] [--no-lock] [--autopilot]
  *   bun run compile lock    --target <name> [--component <name>] | --all-targets
  *   bun run compile clean   --target <name> | --all-targets
  */
@@ -667,6 +667,7 @@ async function cmdBuild(
     flagEffort?: string,
     verbose = false,
     noLock = false,
+    autopilot = false,
 ): Promise<void> {
     const { approveAll } = await import("@github/copilot-sdk");
 
@@ -965,11 +966,22 @@ your final message like this:
         log("");
     }
 
-    // 11. Multi-pass loop — offer to do another pass
-    while (process.stdin.isTTY && !aborted) {
-        const wantMore = await confirmPass();
-
-        if (!wantMore) break;
+    // 11. Multi-pass loop
+    const maxPasses = dirty.length + 5;
+    while (!aborted) {
+        // In autopilot mode, auto-continue up to maxPasses
+        // In interactive mode, prompt the user
+        if (autopilot) {
+            if (passNumber >= maxPasses) {
+                log(chalk.dim(`  Autopilot: reached max passes (${maxPasses}), stopping.\n`));
+                break;
+            }
+        } else if (process.stdin.isTTY) {
+            const wantMore = await confirmPass();
+            if (!wantMore) break;
+        } else {
+            break;
+        }
 
         passNumber++;
         currentPhase = "Starting";
@@ -980,7 +992,8 @@ your final message like this:
         const prevToolCalls = metrics.toolCalls;
         metrics.errors = [];
 
-        log(`\n${chalk.cyan("●")} Pass ${passNumber} — sending improvement prompt...\n`);
+        const passLabel = autopilot ? `Pass ${passNumber}/${maxPasses}` : `Pass ${passNumber}`;
+        log(`\n${chalk.cyan("●")} ${passLabel} — sending improvement prompt...\n`);
 
         await session.send({
             prompt: [
@@ -1184,6 +1197,7 @@ Build options:
   --effort <level>  Reasoning effort: low | medium | high | xhigh (default: high)
   --verbose         Show full agent transcript (raw streaming output)
   --no-lock         Skip auto-lock after successful build
+  --autopilot       Auto-run passes without confirmation (max: components + 5)
 
 Common options:
   --out <dir>       Output directory for compiled code (default: dist/)
@@ -1210,6 +1224,7 @@ interface ParsedArgs {
     effort?: string;
     verbose: boolean;
     noLock: boolean;
+    autopilot: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -1222,6 +1237,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     let effort: string | undefined;
     let verbose = false;
     let noLock = false;
+    let autopilot = false;
 
     for (let i = 1; i < argv.length; i++) {
         if (argv[i] === "--target" && argv[i + 1]) {
@@ -1240,10 +1256,12 @@ function parseArgs(argv: string[]): ParsedArgs {
             verbose = true;
         } else if (argv[i] === "--no-lock") {
             noLock = true;
+        } else if (argv[i] === "--autopilot") {
+            autopilot = true;
         }
     }
 
-    return { command, target, allTargets, component, out, model, effort, verbose, noLock };
+    return { command, target, allTargets, component, out, model, effort, verbose, noLock, autopilot };
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -1270,10 +1288,10 @@ switch (args.command) {
     case "build":
         if (args.allTargets) {
             for (const t of discoverTargets()) {
-                await cmdBuild(t, args.component, distDir, args.model, args.effort, args.verbose, args.noLock);
+                await cmdBuild(t, args.component, distDir, args.model, args.effort, args.verbose, args.noLock, args.autopilot);
             }
         } else if (args.target) {
-            await cmdBuild(args.target, args.component, distDir, args.model, args.effort, args.verbose, args.noLock);
+            await cmdBuild(args.target, args.component, distDir, args.model, args.effort, args.verbose, args.noLock, args.autopilot);
         } else {
             log("Error: --target <name> or --all-targets is required for build command");
             process.exit(1);
