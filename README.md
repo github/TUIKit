@@ -295,6 +295,11 @@ The prompt is written to `<out>/_compile-prompt.md`. It contains:
 - Instructions for the agent (depth-first, verification steps)
 - Demo specification reference
 
+> **Important:** Any coding session that uses this prompt should set its working
+> directory to the dist target folder (where `_compile-prompt.md` lives). The
+> prompt references spec files using relative paths that resolve correctly only
+> from that location.
+
 Feed this file to any LLM agent, then lock manually once verified:
 
 ```bash
