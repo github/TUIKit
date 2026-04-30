@@ -288,7 +288,7 @@ bun run compile prompt --target bun --component Select
 bun run compile prompt --target node --out ~/my-project
 ```
 
-The prompt is written to `<out>/_compile-prompt.md`. It contains:
+The prompt is written to `<out>/<target>/_compile-prompt.md` (e.g. `dist/go/_compile-prompt.md`). It contains:
 
 - The target definition (framework, paradigm, file structure)
 - An index of all dirty specs with file paths and summaries
@@ -296,9 +296,8 @@ The prompt is written to `<out>/_compile-prompt.md`. It contains:
 - Demo specification reference
 
 > **Important:** Any coding session that uses this prompt should set its working
-> directory to the dist target folder (where `_compile-prompt.md` lives). The
-> prompt references spec files using relative paths that resolve correctly only
-> from that location.
+> directory to the repository root (where `components/`, `tokens/`, and `docs/`
+> live). The prompt references spec files using paths relative to the repo root.
 
 Feed this file to any LLM agent, then lock manually once verified:
 

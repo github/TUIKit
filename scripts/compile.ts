@@ -761,13 +761,14 @@ RULES:
 - The interactive demo (--interactive) is the PRIMARY deliverable, not an afterthought.
 - Run tests after EACH component and fix any failures before moving on.
 
-LOCKING COMPLETED COMPONENTS:
+${noLock ? "" : `LOCKING COMPLETED COMPONENTS:
 After you fully complete a component (implementation + tests passing + demo wired),
 lock it by running:
   bun run compile lock --target ${target} --component <Name>
 This records the component as compiled so it won't be recompiled in future runs.
 Only lock a component when you are confident it is DONE — tests pass, demo works.
 Lock tokens the same way: bun run compile lock --target ${target} --component <token-name>
+`}
 
 DEPENDENCIES & KNOWLEDGE CUTOFF:
 Your training data may be outdated. Before assuming a library doesn't exist or
@@ -1196,7 +1197,7 @@ Build options:
   --model <id>      Model to use (e.g. claude-sonnet-4, gpt-5). Prompts if omitted.
   --effort <level>  Reasoning effort: low | medium | high | xhigh (default: high)
   --verbose         Show full agent transcript (raw streaming output)
-  --no-lock         Skip auto-lock after successful build
+  --no-lock         Suppress agent lock instructions (agent won't lock components)
   --autopilot       Auto-run passes without confirmation (max: components + 5)
 
 Common options:
