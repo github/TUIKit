@@ -233,8 +233,7 @@ After each pass, the compiler asks whether to continue. You see a boxed markdown
 summary of what the agent accomplished.
 
 **Autopilot mode** (`--autopilot`): Sets the SDK agent mode to `autopilot`.
-Passes auto-continue without prompting, up to a maximum of `(dirty specs + 5)`
-passes. The agent stops early if everything is complete.
+The agent runs autonomously without user confirmation between actions.
 
 The agent is instructed to follow a **depth-over-breadth** philosophy: it fully
 completes each component (implementation + tests + interactive demo) before
