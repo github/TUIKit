@@ -197,7 +197,7 @@ Optional:
   --effort <level>    Reasoning effort: low | medium | high | xhigh
   --verbose           Show full agent transcript (raw streaming)
   --no-lock           Prevent the agent from locking components
-  --autopilot         Auto-run passes without confirmation (max: specs + 5)
+  --autopilot         Use SDK autopilot mode (agent runs autonomously, max: specs + 5 passes)
   --all-targets       Compile all targets sequentially
 ```
 
@@ -228,12 +228,13 @@ on the previous output — the agent reviews, fixes, and extends its own work.
 | **2nd** | Extend & fix | More components added, test failures fixed, demo polished. |
 | **3rd** | Polish | Catches subtle spec violations, hardens edge cases. |
 
-**Interactive mode** (default): After each pass, the compiler asks whether to
-continue. You see a boxed markdown summary of what the agent accomplished.
+**Interactive mode** (default): The agent runs in the SDK's `interactive` mode.
+After each pass, the compiler asks whether to continue. You see a boxed markdown
+summary of what the agent accomplished.
 
-**Autopilot mode** (`--autopilot`): Passes auto-continue without prompting,
-up to a maximum of `(dirty specs + 5)` passes. The agent stops early if
-everything is complete.
+**Autopilot mode** (`--autopilot`): Sets the SDK agent mode to `autopilot`.
+Passes auto-continue without prompting, up to a maximum of `(dirty specs + 5)`
+passes. The agent stops early if everything is complete.
 
 The agent is instructed to follow a **depth-over-breadth** philosophy: it fully
 completes each component (implementation + tests + interactive demo) before

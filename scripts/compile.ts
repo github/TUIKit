@@ -613,11 +613,11 @@ async function promptBuildConfig(
     return { model: model.id, effort, distDir, supportsEffort };
 }
 
-function printBuildHeader(target: string, config: BuildConfig): void {
+function printBuildHeader(target: string, config: BuildConfig, mode: string): void {
     const effortStr = config.effort ? ` · Effort: ${config.effort}` : "";
     log(`\n${chalk.cyan("●")} ${chalk.bold("TUIkit compiler")}`);
     log(`  Target: ${chalk.bold(target)} · Model: ${chalk.bold(config.model)}${effortStr}`);
-    log(`  Output: ${relative(SPECS_DIR, config.distDir)}/\n`);
+    log(`  Output: ${relative(SPECS_DIR, config.distDir)}/ · Mode: ${mode}\n`);
 }
 
 function printSummary(
@@ -715,7 +715,7 @@ async function cmdBuild(
     writeFileSync(promptPath, prompt);
 
     // 5. Print header
-    printBuildHeader(target, config);
+    printBuildHeader(target, config, sessionMode);
     log(`  ${chalk.dim(`${dirty.length} dirty specs to compile`)}\n`);
 
     // 6. Metrics
@@ -732,6 +732,7 @@ async function cmdBuild(
     };
 
     // 7. Create session
+    const sessionMode = autopilot ? "autopilot" : "interactive";
     const sessionConfig: Record<string, unknown> = {
         model: config.model,
         onPermissionRequest: approveAll,
@@ -815,7 +816,13 @@ your final message like this:
         process.exit(1);
     }
 
-    // 8. SIGINT handler
+    // 8. Set SDK agent mode
+    await session.rpc.mode.set({ mode: sessionMode });
+    if (verbose) {
+        log(chalk.dim(`  Agent mode: ${sessionMode}`));
+    }
+
+    // 9. SIGINT handler
     let aborted = false;
     const sigintHandler = async () => {
         if (aborted) return;
@@ -832,7 +839,7 @@ your final message like this:
     };
     process.on("SIGINT", sigintHandler);
 
-    // 9. Event handlers
+    // 10. Event handlers
     let currentPhase = "Starting";
 
     if (verbose) {
@@ -1198,7 +1205,7 @@ Build options:
   --effort <level>  Reasoning effort: low | medium | high | xhigh (default: high)
   --verbose         Show full agent transcript (raw streaming output)
   --no-lock         Suppress agent lock instructions (agent won't lock components)
-  --autopilot       Auto-run passes without confirmation (max: components + 5)
+  --autopilot       Use SDK autopilot mode — agent runs all passes autonomously
 
 Common options:
   --out <dir>       Output directory for compiled code (default: dist/)
