@@ -197,7 +197,7 @@ Optional:
   --effort <level>    Reasoning effort: low | medium | high | xhigh
   --verbose           Show full agent transcript (raw streaming)
   --no-lock           Prevent the agent from locking components
-  --autopilot         Use SDK autopilot mode (agent runs autonomously, max: specs + 5 passes)
+  --autopilot         Use SDK autopilot mode (agent runs fully autonomously)
   --all-targets       Compile all targets sequentially
 ```
 
@@ -213,27 +213,28 @@ bun run compile build --target bun
 # 3. Or compile non-interactively with all options
 bun run compile build --target bun --model claude-sonnet-4 --out dist/bun-claude
 
-# 4. Or fire-and-forget with autopilot (auto-runs multiple passes)
+# 4. Or fire-and-forget with autopilot (SDK handles everything)
 bun run compile build --target bun --model claude-sonnet-4 --autopilot
 ```
 
 ### Multi-pass compilation
 
-The compiler supports multiple passes within a single session. Each pass builds
-on the previous output — the agent reviews, fixes, and extends its own work.
+The compiler supports two modes, controlled by the `--autopilot` flag:
+
+**Interactive mode** (default): The SDK agent runs in `interactive` mode.
+After the initial compilation pass, the compiler asks whether to continue with
+another pass. Each pass sends an improvement prompt — the agent reviews, fixes,
+and extends its own work. You see a boxed markdown summary after each pass.
+
+**Autopilot mode** (`--autopilot`): Sets the SDK agent mode to `autopilot`.
+The agent runs fully autonomously — it decides when to iterate, how many passes
+to make, and when the work is complete. No user confirmation is needed.
 
 | Pass | Focus | Typical outcome |
 | ---- | ----- | --------------- |
 | **1st** | Initial generation | Core tokens, first components fully wired into interactive demo. |
 | **2nd** | Extend & fix | More components added, test failures fixed, demo polished. |
 | **3rd** | Polish | Catches subtle spec violations, hardens edge cases. |
-
-**Interactive mode** (default): The agent runs in the SDK's `interactive` mode.
-After each pass, the compiler asks whether to continue. You see a boxed markdown
-summary of what the agent accomplished.
-
-**Autopilot mode** (`--autopilot`): Sets the SDK agent mode to `autopilot`.
-The agent runs autonomously without user confirmation between actions.
 
 The agent is instructed to follow a **depth-over-breadth** philosophy: it fully
 completes each component (implementation + tests + interactive demo) before
