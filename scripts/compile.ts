@@ -715,6 +715,7 @@ async function cmdBuild(
     writeFileSync(promptPath, prompt);
 
     // 5. Print header
+    const sessionMode = autopilot ? "autopilot" : "interactive";
     printBuildHeader(target, config, sessionMode);
     log(`  ${chalk.dim(`${dirty.length} dirty specs to compile`)}\n`);
 
@@ -732,7 +733,6 @@ async function cmdBuild(
     };
 
     // 7. Create session
-    const sessionMode = autopilot ? "autopilot" : "interactive";
     const sessionConfig: Record<string, unknown> = {
         model: config.model,
         onPermissionRequest: approveAll,
