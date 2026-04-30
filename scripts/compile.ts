@@ -977,8 +977,6 @@ your final message like this:
     // 11. Multi-pass loop
     const maxPasses = dirty.length + 5;
     while (!aborted) {
-        // In autopilot mode, auto-continue up to maxPasses
-        // In interactive mode, prompt the user
         if (autopilot) {
             if (passNumber >= maxPasses) {
                 log(chalk.dim(`  Autopilot: reached max passes (${maxPasses}), stopping.\n`));
@@ -993,11 +991,6 @@ your final message like this:
 
         passNumber++;
         currentPhase = "Starting";
-        // Reset per-pass metrics (keep cumulative totals)
-        const prevTokensIn = metrics.inputTokens;
-        const prevTokensOut = metrics.outputTokens;
-        const prevReasoning = metrics.reasoningTokens;
-        const prevToolCalls = metrics.toolCalls;
         metrics.errors = [];
 
         const passLabel = autopilot ? `Pass ${passNumber}/${maxPasses}` : `Pass ${passNumber}`;
