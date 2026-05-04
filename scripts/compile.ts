@@ -79,8 +79,6 @@ interface CompileMetrics {
     outputTokens: number;
     reasoningTokens: number;
     toolCalls: number;
-    filesWritten: Set<string>;
-    filesDeleted: Set<string>;
     lastAssistantMessage: string;
     errors: string[];
 }
@@ -417,14 +415,34 @@ function formatDuration(ms: number): string {
 }
 
 /** Count LOC across files the agent actually wrote (ignores node_modules etc.) */
-function countAgentOutput(filesWritten: Set<string>): { files: number; lines: number } {
-    let lines = 0;
+const SCAN_IGNORE = new Set([
+    "node_modules", ".git", "__pycache__", ".mypy_cache", ".pytest_cache",
+    "target", "vendor", ".build", "build", "DerivedData", ".gradle",
+    ".dart_tool", ".packages", "Pods",
+]);
+
+function countOutputDir(dir: string): { files: number; lines: number } {
     let files = 0;
-    for (const fp of filesWritten) {
-        if (!existsSync(fp)) continue;
-        files++;
-        lines += readFileSync(fp, "utf-8").split("\n").length;
-    }
+    let lines = 0;
+    if (!existsSync(dir)) return { files, lines };
+
+    const walk = (d: string) => {
+        for (const entry of readdirSync(d, { withFileTypes: true })) {
+            if (entry.name.startsWith(".") || SCAN_IGNORE.has(entry.name)) continue;
+            const full = join(d, entry.name);
+            if (entry.isDirectory()) {
+                walk(full);
+            } else if (entry.isFile()) {
+                files++;
+                try {
+                    lines += readFileSync(full, "utf-8").split("\n").length;
+                } catch {
+                    /* binary or unreadable — skip */
+                }
+            }
+        }
+    };
+    walk(dir);
     return { files, lines };
 }
 
@@ -627,8 +645,7 @@ function printSummary(
     passNumber = 1,
 ): void {
     const elapsed = Date.now() - metrics.startTime;
-    const { files, lines } = countAgentOutput(metrics.filesWritten);
-    const deleted = metrics.filesDeleted.size;
+    const { files, lines } = countOutputDir(outDir);
     const totalTokens = metrics.inputTokens + metrics.outputTokens;
 
     const tokenDetail =
@@ -636,11 +653,10 @@ function printSummary(
         `${metrics.reasoningTokens ? ` / ${metrics.reasoningTokens.toLocaleString()} reasoning` : ""})`;
 
     const passLabel = passNumber > 1 ? ` (pass ${passNumber})` : "";
-    const filesLine = deleted > 0 ? `${files} written, ${deleted} deleted` : `${files} written`;
     const body = [
         `Model:    ${config.model}${config.effort ? ` (${config.effort} effort)` : ""}`,
         `Time:     ${formatDuration(elapsed)}`,
-        `Files:    ${filesLine}`,
+        `Files:    ${files}`,
         `LOC:      ~${lines.toLocaleString()} lines`,
         `Tokens:   ~${totalTokens.toLocaleString()} total ${tokenDetail}`,
         `Tools:    ${metrics.toolCalls} calls`,
@@ -719,8 +735,6 @@ async function cmdBuild(
         outputTokens: 0,
         reasoningTokens: 0,
         toolCalls: 0,
-        filesWritten: new Set(),
-        filesDeleted: new Set(),
         lastAssistantMessage: "",
         errors: [],
     };
@@ -894,34 +908,8 @@ your final message like this:
         metrics.reasoningTokens += event.data.reasoningTokens ?? 0;
     });
 
-    session.on("tool.execution_start", (event) => {
+    session.on("tool.execution_start", () => {
         metrics.toolCalls++;
-        const { toolName } = event.data;
-        const args = event.data.arguments as Record<string, unknown> | undefined;
-        if (args) {
-            const filePath = (args.path ?? args.file_path ?? args.filePath ?? args.file) as string | undefined;
-            const isWrite =
-                toolName === "edit_file" ||
-                toolName === "create_file" ||
-                toolName === "write_file" ||
-                toolName === "create" ||
-                toolName === "edit" ||
-                toolName === "write" ||
-                toolName === "write_to_file" ||
-                toolName === "str_replace_editor" ||
-                toolName === "insert_edit_into_file" ||
-                toolName.includes("edit") ||
-                toolName.includes("create") ||
-                toolName.includes("write");
-            const isDelete = toolName === "delete_file" || toolName === "delete" || toolName.includes("delete");
-
-            if (isDelete && filePath) {
-                metrics.filesDeleted.add(filePath);
-                metrics.filesWritten.delete(filePath);
-            } else if (isWrite && filePath) {
-                metrics.filesWritten.add(filePath);
-            }
-        }
     });
 
     session.on("session.error", (event) => {
