@@ -3,20 +3,26 @@
  * TUIkit spec compiler
  *
  * Detects changed specs via content hashing and generates self-contained
- * compilation prompts for LLM agents. Lock files track which spec versions
- * have been compiled per target.
+ * compilation prompts for LLM agents. The `build` command uses the Copilot SDK
+ * to launch an agent session that compiles specs into code automatically.
  *
  * Usage:
- *   bun run compile status [--target <name>]
- *   bun run compile prompt --target <name> [--component <name>]
- *   bun run compile lock   --target <name> [--component <name>] | --all-targets
- *   bun run compile clean  --target <name> | --all-targets
+ *   bun run compile status  [--target <name>]
+ *   bun run compile prompt  --target <name> [--component <name>]
+ *   bun run compile build   --target <name> [--component <name>] [--model <id>] [--effort <level>] [--verbose] [--no-lock] [--autopilot]
+ *   bun run compile lock    --target <name> [--component <name>] | --all-targets
+ *   bun run compile clean   --target <name> | --all-targets
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import chalk from "chalk";
+import * as clack from "@clack/prompts";
+import { marked } from "marked";
+import { markedTerminal } from "marked-terminal";
+
+marked.use(markedTerminal());
 
 // biome-ignore lint/suspicious/noConsole: CLI tool — stdout is the interface
 const log = (...args: unknown[]) => console.log(...args);
@@ -56,6 +62,25 @@ interface LockFile {
     schemaHash: string;
     updatedAt: string;
     entries: Record<string, LockEntry>;
+}
+
+type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+interface BuildConfig {
+    model: string;
+    effort: ReasoningEffort | undefined;
+    distDir: string;
+    supportsEffort: boolean;
+}
+
+interface CompileMetrics {
+    startTime: number;
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens: number;
+    toolCalls: number;
+    lastAssistantMessage: string;
+    errors: string[];
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -318,41 +343,678 @@ function generatePrompt(target: string, specs: SpecEntry[], allSpecs: SpecEntry[
     sections.push("");
     sections.push("IMPORTANT: Do NOT spawn sub-agents or delegate to the task tool. Do ALL work yourself directly.");
     sections.push("");
+    sections.push("### Philosophy: depth over breadth");
+    sections.push("");
+    sections.push("It is MUCH better to have a few components that work perfectly — with full");
+    sections.push("interactivity, passing tests, and a working interactive demo — than many");
+    sections.push("components that are half-baked. Each component you implement must be");
+    sections.push("**complete and polished** before moving to the next one.");
+    sections.push("");
+    sections.push("### Workflow");
+    sections.push("");
     sections.push("1. Read the target definition to understand the framework and paradigm.");
-    sections.push("2. For each component listed above, **read the full spec file** from disk, then implement it.");
-    sections.push("3. For each component with a test file, **read the test spec** and implement runnable tests.");
-    sections.push("4. For each component with a preview file, **read the preview spec** and build a demo screen.");
-    sections.push("5. For each token listed above, **read the full spec file** from disk, then implement it.");
-    sections.push(`6. Output all files to: \`${relative(SPECS_DIR, join(distDir, target))}/\``);
+    sections.push("2. Implement all **tokens first** — read each token spec from disk, implement it.");
+    sections.push("3. Then implement components **one at a time, fully**, in this order:");
+    sections.push("   a. Read the full spec file from disk.");
+    sections.push("   b. Implement the component with all variants and interactions.");
+    sections.push("   c. Read the test spec and implement runnable tests. Run them — they must pass.");
+    sections.push("   d. Wire the component into the interactive demo (see below).");
+    sections.push("   e. Verify the component works in the demo with `--component <Name> --snapshot`.");
+    sections.push("   f. Only then move to the next component.");
+    sections.push(`4. Output all files to: \`${relative(SPECS_DIR, distDir)}/\``);
     sections.push(`   This is the dist directory — keep all generated code here, separate from specs.`);
     sections.push("");
 
     if (existsSync(DEMO_PATH)) {
         sections.push("---");
-        sections.push("## Demo specification");
+        sections.push("## Demo specification — INTERACTIVE PLAYGROUND (required)");
         sections.push("");
-        sections.push("The demo app is an interactive component preview browser.");
-        sections.push(`Read the full spec before building the demo: \`${relative(SPECS_DIR, DEMO_PATH)}\``);
+        sections.push("The demo is NOT a static listing. It is a **fully interactive playground**");
+        sections.push("where you can navigate between components and interact with live instances.");
+        sections.push(`Read the full spec: \`${relative(SPECS_DIR, DEMO_PATH)}\``);
+        sections.push("");
+        sections.push("Key requirements:");
+        sections.push("- `--interactive` MUST launch a full-screen TUI with sidebar + preview panel.");
+        sections.push("- Every previewed component MUST be a live, interactive instance (e.g., you can");
+        sections.push("  type in an Input, navigate a Select, scroll a ScrollBox).");
+        sections.push("- Implement the interactive mode **from the first component** — do not leave it");
+        sections.push("  as a stub. It's better to have 3 components in a working playground than");
+        sections.push("  10 components with `--interactive` not implemented.");
+        sections.push("- `--list` and `--snapshot` modes are secondary — they must work, but the");
+        sections.push("  interactive playground is the primary output.");
         sections.push("");
     }
 
     sections.push("---");
     sections.push("## Verification (REQUIRED)");
     sections.push("");
-    sections.push("After generating ALL files, you MUST verify in this order:");
+    sections.push("After implementing each component (not just at the end), verify:");
     sections.push("");
-    sections.push("1. **Run unit tests**: Execute the target's test command and ensure ALL tests pass.");
-    sections.push("   Fix any failures before proceeding.");
-    sections.push("2. **Build the demo**: Compile/build the demo CLI and verify it starts without errors.");
-    sections.push("3. **Verify demo --list**: Run the demo with `--list` and confirm all components/tokens appear.");
-    sections.push("4. **Verify demo --snapshot**: For EVERY component from `--list`, run");
-    sections.push("   `--component <Name> --snapshot` and confirm it exits 0 with non-empty output.");
-    sections.push("   If any snapshot fails, fix the demo wiring before continuing.");
-    sections.push("5. **Run demo smoke tests**: Execute the demo test file and ensure all snapshot tests pass.");
+    sections.push("1. **Unit tests pass**: Run the target's test command for that component.");
+    sections.push("2. **Demo snapshot works**: `--component <Name> --snapshot` exits 0 with output.");
+    sections.push("3. **Interactive demo works**: `--interactive` launches and the component is navigable.");
+    sections.push("");
+    sections.push("After ALL components are done:");
+    sections.push("");
+    sections.push("4. **Full test suite**: Run all tests, ensure everything passes.");
+    sections.push("5. **Demo smoke tests**: Run the demo test file, all snapshots pass.");
     sections.push("6. **Report**: State the final unit test count, demo smoke test count, and pass/fail status.");
     sections.push("");
 
     return sections.join("\n");
+}
+
+// ── Build helpers ──────────────────────────────────────────────────────────
+
+function formatDuration(ms: number): string {
+    const secs = Math.floor(ms / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    const rem = secs % 60;
+    return `${mins}m ${rem}s`;
+}
+
+/** Count LOC across files the agent actually wrote (ignores node_modules etc.) */
+const SCAN_IGNORE = new Set([
+    "node_modules", ".git", "__pycache__", ".mypy_cache", ".pytest_cache",
+    "target", "vendor", ".build", "build", "DerivedData", ".gradle",
+    ".dart_tool", ".packages", "Pods",
+]);
+
+function countOutputDir(dir: string): { files: number; lines: number } {
+    let files = 0;
+    let lines = 0;
+    if (!existsSync(dir)) return { files, lines };
+
+    const walk = (d: string) => {
+        for (const entry of readdirSync(d, { withFileTypes: true })) {
+            if (entry.name.startsWith(".") || SCAN_IGNORE.has(entry.name)) continue;
+            const full = join(d, entry.name);
+            if (entry.isDirectory()) {
+                walk(full);
+            } else if (entry.isFile()) {
+                files++;
+                try {
+                    lines += readFileSync(full, "utf-8").split("\n").length;
+                } catch {
+                    /* binary or unreadable — skip */
+                }
+            }
+        }
+    };
+    walk(dir);
+    return { files, lines };
+}
+
+function summarizeArgs(args: unknown): string {
+    if (!args || typeof args !== "object") return "";
+    const obj = args as Record<string, unknown>;
+    const path = obj.path ?? obj.file_path ?? obj.command;
+    if (typeof path === "string") {
+        const short = path.length > 60 ? `…${path.slice(-57)}` : path;
+        return short;
+    }
+    return "";
+}
+
+function detectPhase(toolName: string, args: unknown): string {
+    const obj = (args ?? {}) as Record<string, unknown>;
+    const path = String(obj.path ?? obj.file_path ?? obj.filePath ?? obj.file ?? "");
+    const cmd = String(obj.command ?? "");
+    const tn = toolName.toLowerCase();
+
+    if (tn.includes("read") || tn === "view") {
+        if (path.includes("tokens/") || path.includes("components/") || path.includes("docs/")) {
+            return "Reading specs";
+        }
+        return "Reading files";
+    }
+    if (tn.includes("edit") || tn.includes("create") || tn.includes("write")) {
+        const match = path.match(/components\/(\w+)/);
+        if (match) return `Implementing ${match[1]}`;
+        if (path.includes("tokens/")) return "Implementing tokens";
+        if (path.includes("demo")) return "Building demo";
+        return "Writing files";
+    }
+    if (tn === "bash" || tn === "shell" || tn.includes("terminal") || tn.includes("command")) {
+        if (cmd.includes("test")) return "Running tests";
+        if (cmd.includes("build") || cmd.includes("compile")) return "Building";
+        if (cmd.includes("run")) return "Running";
+        return "Executing command";
+    }
+    if (tn === "glob" || tn === "grep" || tn.includes("search") || tn.includes("find")) return "Searching files";
+    if (tn.includes("delete")) return "Cleaning up";
+    return "Working";
+}
+
+// ── Build command ──────────────────────────────────────────────────────────
+
+async function confirmPass(): Promise<boolean> {
+    const result = await clack.confirm({
+        message: "Do another pass? (improves consistency)",
+        initialValue: true,
+    });
+    if (clack.isCancel(result)) return false;
+    return result;
+}
+
+async function ensureCopilotAuth(): Promise<import("@github/copilot-sdk").CopilotClient> {
+    const { CopilotClient } = await import("@github/copilot-sdk");
+    const client = new CopilotClient({ useLoggedInUser: true });
+
+    try {
+        await client.start();
+        await client.ping();
+    } catch (err) {
+        log(chalk.red("✗") + " Copilot authentication failed.\n");
+        log("  The build command requires a valid GitHub Copilot subscription.");
+        log("  Try one of:\n");
+        log(`    ${chalk.cyan("copilot auth login")}          Sign in via browser`);
+        log(`    ${chalk.cyan("export GITHUB_TOKEN=ghp_...")} Use a personal access token`);
+        log(`    ${chalk.cyan("export GH_TOKEN=ghp_...")}     GitHub CLI token\n`);
+        if (err instanceof Error) log(chalk.dim(`  Error: ${err.message}`));
+        process.exit(1);
+    }
+
+    return client;
+}
+
+async function pickModel(
+    client: import("@github/copilot-sdk").CopilotClient,
+    preselected?: string,
+): Promise<{ id: string; name: string }> {
+    const models = await client.listModels();
+    if (models.length === 0) {
+        log(chalk.red("✗") + " No models available. Check your Copilot subscription.");
+        process.exit(1);
+    }
+
+    const defaultModel =
+        (preselected ? models.find((m) => m.id === preselected) : undefined) ??
+        models.find((m) => m.id === "claude-sonnet-4") ??
+        models[0];
+
+    if (!process.stdin.isTTY) {
+        return { id: defaultModel.id, name: defaultModel.name };
+    }
+
+    const result = await clack.select({
+        message: "Select model:",
+        options: models.map((m) => ({ value: m.id, label: `${m.name} (${m.id})` })),
+        initialValue: defaultModel.id,
+    });
+
+    if (clack.isCancel(result)) {
+        clack.cancel("Build cancelled.");
+        process.exit(0);
+    }
+
+    const model = models.find((m) => m.id === result) ?? defaultModel;
+    return { id: model.id, name: model.name };
+}
+
+async function pickEffort(preselected?: string): Promise<ReasoningEffort> {
+    const defaultEffort = (preselected && ["low", "medium", "high", "xhigh"].includes(preselected))
+        ? preselected
+        : "high";
+
+    if (!process.stdin.isTTY) return defaultEffort as ReasoningEffort;
+
+    const result = await clack.select({
+        message: "Reasoning effort:",
+        options: [
+            { value: "low", label: "low" },
+            { value: "medium", label: "medium" },
+            { value: "high", label: "high" },
+            { value: "xhigh", label: "xhigh" },
+        ],
+        initialValue: defaultEffort,
+    });
+
+    if (clack.isCancel(result)) {
+        clack.cancel("Build cancelled.");
+        process.exit(0);
+    }
+
+    return result as ReasoningEffort;
+}
+
+async function pickOutputDir(target: string, preselected?: string): Promise<string> {
+    const defaultDir = preselected
+        ? join(process.cwd(), preselected)
+        : join(DEFAULT_DIST_DIR, target);
+    const displayDefault = relative(SPECS_DIR, defaultDir) || ".";
+
+    if (!process.stdin.isTTY) return defaultDir;
+
+    const result = await clack.text({
+        message: "Output directory:",
+        initialValue: displayDefault,
+    });
+
+    if (clack.isCancel(result)) {
+        clack.cancel("Build cancelled.");
+        process.exit(0);
+    }
+
+    if (!result || result === displayDefault) return defaultDir;
+    return join(SPECS_DIR, result);
+}
+
+async function promptBuildConfig(
+    client: import("@github/copilot-sdk").CopilotClient,
+    flags: { model?: string; effort?: string; out?: string },
+    target: string,
+): Promise<BuildConfig> {
+    clack.intro(chalk.cyan("TUIkit compiler"));
+
+    // Fetch available models to validate and check capabilities
+    const models = await client.listModels();
+
+    // Always prompt for model (flag value becomes the pre-selected default)
+    const model = await pickModel(client, flags.model);
+
+    // Check if model supports reasoning effort
+    const modelInfo = models.find((m) => m.id === model.id);
+    const supportsEffort = !!(modelInfo?.supportedReasoningEfforts && modelInfo.supportedReasoningEfforts.length > 0);
+
+    // Always prompt for effort if model supports it (flag becomes default)
+    let effort: ReasoningEffort | undefined;
+    if (supportsEffort) {
+        effort = await pickEffort(flags.effort);
+    }
+
+    // Always prompt for output location (flag or dist/ as default)
+    const distDir = await pickOutputDir(target, flags.out);
+
+    return { model: model.id, effort, distDir, supportsEffort };
+}
+
+function printBuildHeader(target: string, config: BuildConfig, mode: string, dirtyCount: number): void {
+    const effortStr = config.effort ? `, ${config.effort} effort` : "";
+    clack.log.step(`${chalk.bold(target)} · ${config.model}${effortStr} · ${mode}`);
+    clack.log.info(chalk.dim(`${dirtyCount} dirty specs to compile`));
+}
+
+function printSummary(
+    target: string,
+    config: BuildConfig,
+    metrics: CompileMetrics,
+    outDir: string,
+    noLock: boolean,
+    passNumber = 1,
+): void {
+    const elapsed = Date.now() - metrics.startTime;
+    const { files, lines } = countOutputDir(outDir);
+    const totalTokens = metrics.inputTokens + metrics.outputTokens;
+
+    const tokenDetail =
+        `(${metrics.inputTokens.toLocaleString()} in / ${metrics.outputTokens.toLocaleString()} out` +
+        `${metrics.reasoningTokens ? ` / ${metrics.reasoningTokens.toLocaleString()} reasoning` : ""})`;
+
+    const passLabel = passNumber > 1 ? ` (pass ${passNumber})` : "";
+    const body = [
+        `Model:    ${config.model}${config.effort ? ` (${config.effort} effort)` : ""}`,
+        `Time:     ${formatDuration(elapsed)}`,
+        `Files:    ${files}`,
+        `LOC:      ~${lines.toLocaleString()} lines`,
+        `Tokens:   ~${totalTokens.toLocaleString()} total ${tokenDetail}`,
+        `Tools:    ${metrics.toolCalls} calls`,
+        `Passes:   ${passNumber}`,
+        `Output:   ${relative(SPECS_DIR, outDir)}/`,
+        noLock ? `Lock:     skipped (--no-lock)` : `Lock:     ${relative(SPECS_DIR, lockPath(target))}`,
+    ].join("\n");
+
+    clack.log.success(`Compilation complete — target: ${target}${passLabel}`);
+    clack.log.message(chalk.dim(body));
+}
+
+async function cmdBuild(
+    target: string,
+    componentFilter?: string,
+    _distDir: string = DEFAULT_DIST_DIR,
+    flagModel?: string,
+    flagEffort?: string,
+    verbose = false,
+    noLock = false,
+    autopilot = false,
+): Promise<void> {
+    const { approveAll } = await import("@github/copilot-sdk");
+
+    // 1. Quick check — any dirty specs at all?
+    const specs = discoverSpecs();
+    const schemaHash = sha256(readFile(SCHEMA_PATH));
+    const lock = readLock(target);
+    let dirty = computeDirty(specs, lock, schemaHash);
+
+    if (componentFilter) {
+        dirty = dirty.filter(
+            (d) => d.spec.name === `components/${componentFilter}` || d.spec.name === `tokens/${componentFilter}`,
+        );
+    }
+
+    if (dirty.length === 0) {
+        log(`${chalk.green("✓")} No dirty specs for target "${target}". Nothing to compile.`);
+        log(`  ${chalk.dim(`Lock: ${relative(SPECS_DIR, lockPath(target))}`)}`);
+        return;
+    }
+
+    // 2. Auth first (fail fast before interactive prompts)
+    log(chalk.dim("  Authenticating with Copilot..."));
+    const client = await ensureCopilotAuth();
+
+    // 3. Interactive config — always prompts with good defaults
+    //    Flags pre-select the default; user can still change it.
+    const config = await promptBuildConfig(
+        client,
+        {
+            model: flagModel,
+            effort: flagEffort,
+            out: _distDir !== DEFAULT_DIST_DIR ? relative(process.cwd(), _distDir) : undefined,
+        },
+        target,
+    );
+
+    // 4. Generate prompt (uses config.distDir chosen by the user)
+    const distDir = config.distDir;
+    const dirtySpecs = dirty.map((d) => d.spec);
+    const prompt = generatePrompt(target, dirtySpecs, specs, distDir);
+    const outDir = distDir;
+    mkdirSync(outDir, { recursive: true });
+    const promptPath = join(outDir, "_compile-prompt.md");
+    writeFileSync(promptPath, prompt);
+
+    // 5. Print header
+    const sessionMode = autopilot ? "autopilot" : "interactive";
+    printBuildHeader(target, config, sessionMode, dirty.length);
+
+    // 6. Metrics
+    const metrics: CompileMetrics = {
+        startTime: Date.now(),
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        toolCalls: 0,
+        lastAssistantMessage: "",
+        errors: [],
+    };
+
+    // 7. Create session
+    const sessionConfig: Record<string, unknown> = {
+        model: config.model,
+        onPermissionRequest: approveAll,
+        streaming: true,
+        systemMessage: {
+            content: `
+<compilation_context>
+You are a TUIkit spec compiler. Your job is to read component specifications
+and generate idiomatic code for the target framework.
+
+Working directory: ${SPECS_DIR}
+Output directory: ${relative(SPECS_DIR, outDir)}
+
+PHILOSOPHY: Depth over breadth.
+It is far better to deliver a few components that are fully complete —
+with passing tests and working interactive demo — than many components
+that are half-implemented. Completeness means: the component renders
+correctly, responds to user input, is wired into the interactive
+playground, and all tests pass.
+
+RULES:
+- Do NOT spawn sub-agents or delegate to the task tool. Do ALL work yourself directly.
+- Do NOT ask the user questions. Proceed with your best judgment.
+- Read ALL referenced spec files from disk before implementing.
+- Output all generated code to the specified output directory.
+- Implement one component at a time, fully, before starting the next.
+- The interactive demo (--interactive) is the PRIMARY deliverable, not an afterthought.
+- Run tests after EACH component and fix any failures before moving on.
+
+${noLock ? "" : `LOCKING COMPLETED COMPONENTS:
+After you fully complete a component (implementation + tests passing + demo wired),
+lock it by running:
+  bun run compile lock --target ${target} --component <Name>
+This records the component as compiled so it won't be recompiled in future runs.
+Only lock a component when you are confident it is DONE — tests pass, demo works.
+Lock tokens the same way: bun run compile lock --target ${target} --component <token-name>
+`}
+
+DEPENDENCIES & KNOWLEDGE CUTOFF:
+Your training data may be outdated. Before assuming a library doesn't exist or
+falling back to self-contained polyfills, you MUST use web browsing / fetch to
+check the library's actual npm registry page, GitHub repo, or documentation.
+Install the real package if it exists. Only polyfill if you've confirmed the
+package genuinely isn't published. This applies to ALL dependencies referenced
+in the target spec (e.g., @opentui/*, ink, bubbletea crates, etc.).
+
+MULTI-PASS APPROACH:
+This session may receive multiple passes. At the END of each pass, you MUST
+include a clear summary of what was accomplished and what remains. Structure
+your final message like this:
+
+## Pass summary
+- What was completed (components, tests, demo wiring)
+- Current test results (X passing, Y failing)
+- Interactive demo status
+
+## Next pass priorities
+- List specific components or work items that should be tackled next
+- Note any known issues or failing tests to fix
+- If everything is complete, say so explicitly
+</compilation_context>
+`,
+        },
+    };
+    if (config.effort && config.supportsEffort) {
+        sessionConfig.reasoningEffort = config.effort;
+    }
+
+    let session: Awaited<ReturnType<typeof client.createSession>>;
+    try {
+        // biome-ignore lint/suspicious/noExplicitAny: SDK config types are complex
+        session = await client.createSession(sessionConfig as any);
+    } catch (err) {
+        clack.log.error("Failed to create agent session.");
+        if (err instanceof Error) clack.log.message(chalk.dim(`Error: ${err.message}`));
+        clack.log.message(
+            "This could mean:\n" +
+                "  • The model is unavailable or unsupported\n" +
+                "  • Your Copilot subscription doesn't include this model\n" +
+                "  • A transient service error — try again",
+        );
+        clack.outro(chalk.red("Exiting"));
+        await client.stop();
+        process.exit(1);
+    }
+
+    // 8. Set SDK agent mode
+    await session.rpc.mode.set({ mode: sessionMode });
+    if (verbose) {
+        log(chalk.dim(`  Agent mode: ${sessionMode}`));
+    }
+
+    // 9. SIGINT handler
+    let aborted = false;
+    const sigintHandler = async () => {
+        if (aborted) return;
+        aborted = true;
+        clack.outro(chalk.yellow("Compilation interrupted"));
+        try {
+            await session.abort();
+            await session.disconnect();
+            await client.stop();
+        } catch {
+            /* best-effort cleanup */
+        }
+        process.exit(130);
+    };
+    process.on("SIGINT", sigintHandler);
+
+    // 10. Event handlers
+    let currentPhase = "Starting";
+
+    if (verbose) {
+        // ── Verbose mode: raw transcript ──
+        session.on("assistant.message_delta", (event) => {
+            process.stdout.write(event.data.deltaContent);
+        });
+
+        session.on("assistant.reasoning_delta", (event) => {
+            process.stdout.write(chalk.dim(event.data.deltaContent));
+        });
+        session.on("tool.execution_start", (event) => {
+            const { toolName } = event.data;
+            const argStr = summarizeArgs(event.data.arguments);
+            log(chalk.dim(`\n  ${toolName}${argStr ? ` ${argStr}` : ""}`));
+        });
+
+        session.on("tool.execution_complete", (event) => {
+            const icon = event.data.success ? chalk.green("✓") : chalk.red("✗");
+            const toolId = event.data.toolCallId.slice(0, 8);
+            log(chalk.dim(`  ${icon} ${toolId}`));
+        });
+    } else {
+        // ── Normal mode: compact status using clack timeline ──
+        session.on("tool.execution_start", (event) => {
+            const { toolName } = event.data;
+            const argStr = summarizeArgs(event.data.arguments);
+            const phase = detectPhase(toolName, event.data.arguments);
+
+            if (phase !== currentPhase) {
+                if (currentPhase !== "Starting") {
+                    clack.log.success(currentPhase);
+                }
+                currentPhase = phase;
+                clack.log.step(phase);
+            }
+
+            log(`${chalk.gray("│")}  ${chalk.dim(`${toolName}${argStr ? ` ${argStr}` : ""}`)}`);
+
+        });
+    }
+
+    // Common event handlers for both modes
+    let pendingDelta = "";
+    session.on("assistant.message_delta", (event) => {
+        pendingDelta += event.data.deltaContent;
+    });
+
+    session.on("assistant.message", (event) => {
+        const content = event.data.content || pendingDelta;
+        if (content) {
+            metrics.lastAssistantMessage = content;
+        }
+        pendingDelta = "";
+    });
+
+    session.on("assistant.usage", (event) => {
+        metrics.inputTokens += event.data.inputTokens ?? 0;
+        metrics.outputTokens += event.data.outputTokens ?? 0;
+        metrics.reasoningTokens += event.data.reasoningTokens ?? 0;
+    });
+
+    session.on("tool.execution_start", () => {
+        metrics.toolCalls++;
+    });
+
+    session.on("session.error", (event) => {
+        const msg = (event.data as { message?: string }).message ?? "Unknown error";
+        metrics.errors.push(msg);
+        if (verbose) {
+            log(chalk.red(`\n✗ Session error: ${msg}`));
+        } else {
+            clack.log.error(msg);
+        }
+    });
+
+    // 10. Send prompt and wait for idle — with multi-pass loop
+    let passNumber = 1;
+
+    const waitForIdle = (): Promise<void> =>
+        new Promise<void>((resolve) => {
+            const unsub = session.on("session.idle", () => {
+                unsub();
+                resolve();
+            });
+        });
+
+    await session.send({ prompt });
+    await waitForIdle();
+
+    // Complete final phase in normal mode
+    if (!verbose && currentPhase !== "Starting") {
+        clack.log.success(currentPhase);
+    }
+
+    // Show the agent's last message as a pass recap
+    if (metrics.lastAssistantMessage) {
+        const rendered = marked(metrics.lastAssistantMessage.trim()) as string;
+        clack.note(rendered.trimEnd(), "Agent summary");
+    }
+
+    // Show summary for this pass
+    printSummary(target, config, metrics, outDir, noLock, passNumber);
+
+    if (metrics.errors.length > 0) {
+        clack.log.warn("Completed with errors:\n" + metrics.errors.map((e) => `  ${chalk.red("•")} ${e}`).join("\n"));
+    }
+
+    // 11. Multi-pass loop — user can always trigger additional passes
+    while (!aborted && process.stdin.isTTY) {
+        const wantMore = await confirmPass();
+        if (!wantMore) break;
+
+        passNumber++;
+        currentPhase = "Starting";
+        metrics.errors = [];
+
+        clack.log.step(`Pass ${passNumber} — sending improvement prompt`);
+
+        await session.send({
+            prompt: [
+                "Do another pass over the compilation output.",
+                "Re-read the original spec files and the compile prompt at " +
+                    `\`${relative(SPECS_DIR, promptPath)}\` to check what you may have missed.`,
+                "",
+                "Remember: DEPTH OVER BREADTH. A few components working perfectly",
+                "(with interactive demo) is better than many half-working ones.",
+                "",
+                "Focus on:",
+                "- The interactive demo (`--interactive`) — it MUST work as a full-screen playground",
+                "- Components already implemented: polish, fix bugs, ensure full interactivity",
+                "- Tests that are failing or missing",
+                "- Add the NEXT component (fully: implementation + tests + demo wiring)",
+                "- Token usage correctness",
+                "After fixing, run the tests and verify `--interactive` works, then report results.",
+            ].join("\n"),
+        });
+
+        await waitForIdle();
+
+        if (!verbose && currentPhase !== "Starting") {
+            clack.log.success(currentPhase);
+        }
+
+        if (metrics.lastAssistantMessage) {
+            const rendered = marked(metrics.lastAssistantMessage.trim()) as string;
+            clack.note(rendered.trimEnd(), "Agent summary");
+        }
+
+        printSummary(target, config, metrics, outDir, noLock, passNumber);
+
+        if (metrics.errors.length > 0) {
+            clack.log.warn("Pass completed with errors:\n" + metrics.errors.map((e) => `  ${chalk.red("•")} ${e}`).join("\n"));
+        }
+    }
+
+    // 12. Cleanup
+    clack.outro(chalk.dim("Session ended"));
+    try {
+        await session.disconnect();
+        await client.stop();
+    } catch {
+        /* best-effort */
+    }
+    process.removeListener("SIGINT", sigintHandler);
 }
 
 // ── Commands ───────────────────────────────────────────────────────────────
@@ -405,14 +1067,15 @@ function cmdPrompt(target: string, componentFilter?: string, distDir: string = D
 
     if (dirty.length === 0) {
         log(`${chalk.green("✓")} No dirty specs for target "${target}".`);
+        log(`  ${chalk.dim(`Lock: ${relative(SPECS_DIR, lockPath(target))}`)}`);
         return;
     }
 
     const dirtySpecs = dirty.map((d) => d.spec);
-    const prompt = generatePrompt(target, dirtySpecs, specs, distDir);
+    const outDir = join(distDir, target);
+    const prompt = generatePrompt(target, dirtySpecs, specs, outDir);
 
     // Write prompt to dist directory
-    const outDir = join(distDir, target);
     mkdirSync(outDir, { recursive: true });
     const outPath = join(outDir, "_compile-prompt.md");
     writeFileSync(outPath, prompt);
@@ -485,36 +1148,65 @@ function cmdClean(target: string, distDir: string = DEFAULT_DIST_DIR): void {
 
 function usage(): void {
     log(`
-TUIkit spec compiler — detect changes, generate prompts, track state.
+TUIkit spec compiler — detect changes, generate prompts, compile via Copilot SDK.
 
 Commands:
   status  [--target <name>]                    Show dirty/clean status
   prompt  --target <name> [--component <name>] Generate compilation prompt
           --all-targets                        Generate prompts for all targets
+  build   --target <name> [--component <name>] Compile specs via Copilot SDK agent
+          --all-targets                        Build all targets sequentially
   lock    --target <name> [--component <name>] Snapshot spec hashes to lock file
           --all-targets                        Lock all targets
   clean   --target <name>                      Remove lock file + prompt
           --all-targets                        Clean all targets
 
-Options:
-  --out <dir>   Output directory for compiled code (default: specs/dist/)
+Build options:
+  --model <id>      Model to use (e.g. claude-sonnet-4, gpt-5). Prompts if omitted.
+  --effort <level>  Reasoning effort: low | medium | high | xhigh (default: high)
+  --verbose         Show full agent transcript (raw streaming output)
+  --no-lock         Suppress agent lock instructions (agent won't lock components)
+  --autopilot       Use SDK autopilot mode — agent runs all passes autonomously
+
+Common options:
+  --out <dir>       Output directory for compiled code (default: dist/)
 
 Examples:
   bun run compile status
   bun run compile prompt --target go
-  bun run compile prompt --target go --out ./my-tuikit
-  bun run compile prompt --target rust --component HintBar
+  bun run compile build --target go
+  bun run compile build --target rust --model claude-sonnet-4 --effort high --verbose
+  bun run compile build --target node --component HintBar
+  bun run compile build --all-targets --model gpt-5 --effort xhigh
   bun run compile lock --target go
   bun run compile clean --target bun
 `);
 }
 
-function parseArgs(argv: string[]): { command: string; target?: string; allTargets: boolean; component?: string; out?: string } {
+interface ParsedArgs {
+    command: string;
+    target?: string;
+    allTargets: boolean;
+    component?: string;
+    out?: string;
+    model?: string;
+    effort?: string;
+    verbose: boolean;
+    noLock: boolean;
+    autopilot: boolean;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
     const command = argv[0] || "status";
     let target: string | undefined;
     let allTargets = false;
     let component: string | undefined;
     let out: string | undefined;
+    let model: string | undefined;
+    let effort: string | undefined;
+    let verbose = false;
+    let noLock = false;
+    let autopilot = false;
 
     for (let i = 1; i < argv.length; i++) {
         if (argv[i] === "--target" && argv[i + 1]) {
@@ -525,10 +1217,20 @@ function parseArgs(argv: string[]): { command: string; target?: string; allTarge
             component = argv[++i];
         } else if (argv[i] === "--out" && argv[i + 1]) {
             out = argv[++i];
+        } else if (argv[i] === "--model" && argv[i + 1]) {
+            model = argv[++i];
+        } else if (argv[i] === "--effort" && argv[i + 1]) {
+            effort = argv[++i];
+        } else if (argv[i] === "--verbose") {
+            verbose = true;
+        } else if (argv[i] === "--no-lock") {
+            noLock = true;
+        } else if (argv[i] === "--autopilot") {
+            autopilot = true;
         }
     }
 
-    return { command, target, allTargets, component, out };
+    return { command, target, allTargets, component, out, model, effort, verbose, noLock, autopilot };
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -549,6 +1251,18 @@ switch (args.command) {
             cmdPrompt(args.target, args.component, distDir);
         } else {
             log("Error: --target <name> or --all-targets is required for prompt command");
+            process.exit(1);
+        }
+        break;
+    case "build":
+        if (args.allTargets) {
+            for (const t of discoverTargets()) {
+                await cmdBuild(t, args.component, distDir, args.model, args.effort, args.verbose, args.noLock, args.autopilot);
+            }
+        } else if (args.target) {
+            await cmdBuild(args.target, args.component, distDir, args.model, args.effort, args.verbose, args.noLock, args.autopilot);
+        } else {
+            log("Error: --target <name> or --all-targets is required for build command");
             process.exit(1);
         }
         break;

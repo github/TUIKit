@@ -27,6 +27,7 @@ flowchart LR
 ### Prerequisites
 
 - [Bun](https://bun.sh/) 1.1+ installed (`bun --version`)
+- A [GitHub Copilot](https://github.com/features/copilot) subscription (for the `compile build` command)
 
 ### Install dependencies
 
@@ -171,63 +172,139 @@ All normative sections (Visual rules, Behavior, Edge cases) use
 | `bun`    | TypeScript | OpenTUI + React (Bun)  | `targets/bun.md`    |
 | `rust`   | Rust       | Ratatui + Crossterm    | `targets/rust.md`   |
 
+### Commands
+
+| Command | Purpose |
+| ------- | ------- |
+| `compile status` | Show dirty/locked specs per target |
+| `compile prompt` | Generate a compilation prompt file |
+| `compile build` | Run an agent session to compile specs (requires Copilot) |
+| `compile lock` | Lock spec hashes after verified compilation |
+| `compile clean` | Remove lock file for a target |
+
+### Build flags
+
+```
+bun run compile build --target <name> [flags]
+
+Required:
+  --target <name>     Target to compile (go, node, bun, rust)
+
+Optional:
+  --component <name>  Compile a single component/token only
+  --out <dir>         Output directory (default: dist/<target>)
+  --model <id>        Model to use (e.g. claude-sonnet-4, gpt-5)
+  --effort <level>    Reasoning effort: low | medium | high | xhigh
+  --verbose           Show full agent transcript (raw streaming)
+  --no-lock           Prevent the agent from locking components
+  --autopilot         Use SDK autopilot mode (agent runs fully autonomously)
+  --all-targets       Compile all targets sequentially
+```
+
 ### Workflow
 
 ```bash
 # 1. See what's changed
 bun run compile status
 
-# 2. Generate the compilation prompt
-bun run compile prompt --target go
+# 2. Compile interactively (prompts for model, effort, output dir)
+bun run compile build --target bun
 
-# 3. Feed dist/go/_compile-prompt.md to an LLM agent
-#    The agent generates code into dist/go/
+# 3. Or compile non-interactively with all options
+bun run compile build --target bun --model claude-sonnet-4 --out dist/bun-claude
 
-# 4. Verify: run tests, check the demo CLI
-cd dist/go && go test ./... && go run ./cmd/demo
-
-# 5. Lock the hashes
-bun run compile lock --target go
+# 4. Or fire-and-forget with autopilot (SDK handles everything)
+bun run compile build --target bun --model claude-sonnet-4 --autopilot
 ```
 
 ### Multi-pass compilation
 
-A single compilation pass across the full component suite (17 components +
-tokens + demo) is usually not enough to reach production quality. We've found
-that **2–3 passes** produce notably better results:
+The compiler supports two modes, controlled by the `--autopilot` flag:
+
+**Interactive mode** (default): The SDK agent runs in `interactive` mode.
+After the initial compilation pass, the compiler asks whether to continue with
+another pass. Each pass sends an improvement prompt — the agent reviews, fixes,
+and extends its own work. You see a boxed markdown summary after each pass.
+
+**Autopilot mode** (`--autopilot`): Sets the SDK agent mode to `autopilot`.
+The agent runs fully autonomously — it decides when to iterate, how many passes
+to make, and when the work is complete. No user confirmation is needed.
 
 | Pass | Focus | Typical outcome |
 | ---- | ----- | --------------- |
-| **1st** | Initial generation | All components scaffold correctly, most tests pass, demo wires up. Expect rough edges — missing edge cases, incomplete keybindings, demo wiring bugs. |
-| **2nd** | Review & fix | Agent reviews its own output against specs, fixes test failures, fills in missing behavior, improves demo interactivity. Test count typically grows 30–50%. |
-| **3rd** | Polish | Catches subtle spec violations, improves accessibility, hardens demo `--snapshot` smoke tests. Diminishing returns after this point. |
+| **1st** | Initial generation | Core tokens, first components fully wired into interactive demo. |
+| **2nd** | Extend & fix | More components added, test failures fixed, demo polished. |
+| **3rd** | Polish | Catches subtle spec violations, hardens edge cases. |
 
-To run a follow-up pass, generate a new prompt and tell the agent to review
-and complete its existing work:
+The agent is instructed to follow a **depth-over-breadth** philosophy: it fully
+completes each component (implementation + tests + interactive demo) before
+moving to the next one.
+
+### Component locking
+
+The agent locks components individually as it completes them by running:
 
 ```bash
-# Generate a fresh prompt (it sees the current dist/ state)
-bun run compile prompt --target go
-
-# Feed to the agent with instructions like:
-# "Review your existing implementation against the specs.
-#  Fix any test failures, fill in missing behavior,
-#  and ensure all --snapshot smoke tests pass."
+bun run compile lock --target bun --component Select
 ```
 
-Each pass is fast because the agent builds on its own prior output rather than
-starting from scratch. The demo's `--list` and `--snapshot` flags make it easy
-for the agent to self-verify between passes.
+This records the spec hash so the component won't be recompiled unless its spec
+changes. You can also lock manually after verifying generated code:
+
+```bash
+# Lock a single component
+bun run compile lock --target go --component Input
+
+# Lock all specs for a target
+bun run compile lock --target go
+
+# Lock all targets
+bun run compile lock --all-targets
+```
 
 ### Custom output directory
 
-By default, compiled code goes to `dist/`. Override with `--out`:
+By default, compiled code goes to `dist/<target>/`. Override with `--out`:
 
 ```bash
-# Output to a separate repo or directory
-bun run compile prompt --target go --out ~/my-tuikit-go
+# Output to a custom directory
+bun run compile build --target go --out dist/go-experimental
 
-# The prompt and generated code go to ~/my-tuikit-go/go/
+# The prompt and generated code go directly to dist/go-experimental/
+```
+
+### Generating prompts manually
+
+If you prefer to feed the prompt to an external agent (Claude, ChatGPT, Copilot
+Chat, etc.) instead of using `compile build`, use the `prompt` command:
+
+```bash
+# Generate a prompt for a target
+bun run compile prompt --target go
+
+# Generate for a single component
+bun run compile prompt --target bun --component Select
+
+# Generate to a custom directory
+bun run compile prompt --target node --out ~/my-project
+```
+
+The prompt is written to `<out>/<target>/_compile-prompt.md` (e.g. `dist/go/_compile-prompt.md`). It contains:
+
+- The target definition (framework, paradigm, file structure)
+- An index of all dirty specs with file paths and summaries
+- Instructions for the agent (depth-first, verification steps)
+- Demo specification reference
+
+> **Important:** Any coding session that uses this prompt should set its working
+> directory to the repository root (where `components/`, `tokens/`, and `docs/`
+> live). The prompt references spec files using paths relative to the repo root.
+
+Feed this file to any LLM agent, then lock manually once verified:
+
+```bash
+# After the agent generates code and tests pass:
+bun run compile lock --target go
 ```
 
 ### Adding a new target
@@ -237,7 +314,7 @@ bun run compile prompt --target go --out ~/my-tuikit-go
    machine pattern, token access, styling, composition, test pattern, key
    mapping, dependencies, and demo CLI
 3. Run `bun run compile status` — your target will show up with all specs dirty
-4. Run `bun run compile prompt --target {name}` and compile
+4. Run `bun run compile build --target {name}` to compile
 
 ## Linting
 
