@@ -861,7 +861,6 @@ your final message like this:
         session.on("assistant.reasoning_delta", (event) => {
             process.stdout.write(chalk.dim(event.data.deltaContent));
         });
-
         session.on("tool.execution_start", (event) => {
             const { toolName } = event.data;
             const argStr = summarizeArgs(event.data.arguments);
@@ -875,10 +874,6 @@ your final message like this:
         });
     } else {
         // ── Normal mode: compact status using clack timeline ──
-        session.on("assistant.message_delta", () => {
-            // Suppress in normal mode — we show phase-level status instead
-        });
-
         session.on("tool.execution_start", (event) => {
             const { toolName } = event.data;
             const argStr = summarizeArgs(event.data.arguments);
@@ -898,8 +893,17 @@ your final message like this:
     }
 
     // Common event handlers for both modes
+    let pendingDelta = "";
+    session.on("assistant.message_delta", (event) => {
+        pendingDelta += event.data.deltaContent;
+    });
+
     session.on("assistant.message", (event) => {
-        metrics.lastAssistantMessage = event.data.content;
+        const content = event.data.content || pendingDelta;
+        if (content) {
+            metrics.lastAssistantMessage = content;
+        }
+        pendingDelta = "";
     });
 
     session.on("assistant.usage", (event) => {
