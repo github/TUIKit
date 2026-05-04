@@ -878,7 +878,8 @@ your final message like this:
                 clack.log.step(phase);
             }
 
-            clack.log.message(chalk.dim(`${toolName}${argStr ? ` ${argStr}` : ""}`));
+            log(`${chalk.gray("│")}  ${chalk.dim(`${toolName}${argStr ? ` ${argStr}` : ""}`)}`);
+
         });
     }
 
