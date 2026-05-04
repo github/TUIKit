@@ -13,6 +13,6 @@
     "marked-terminal": "7",
     "remark": "^15.0.1",
     "remark-frontmatter": "^5.0.0",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   }
 }
