@@ -21,7 +21,6 @@ import chalk from "chalk";
 import * as clack from "@clack/prompts";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
-import boxen from "boxen";
 
 marked.use(markedTerminal());
 
@@ -613,11 +612,10 @@ async function promptBuildConfig(
     return { model: model.id, effort, distDir, supportsEffort };
 }
 
-function printBuildHeader(target: string, config: BuildConfig, mode: string): void {
-    const effortStr = config.effort ? ` · Effort: ${config.effort}` : "";
-    log(`\n${chalk.cyan("●")} ${chalk.bold("TUIkit compiler")}`);
-    log(`  Target: ${chalk.bold(target)} · Model: ${chalk.bold(config.model)}${effortStr}`);
-    log(`  Output: ${relative(SPECS_DIR, config.distDir)}/ · Mode: ${mode}\n`);
+function printBuildHeader(target: string, config: BuildConfig, mode: string, dirtyCount: number): void {
+    const effortStr = config.effort ? `, ${config.effort} effort` : "";
+    clack.log.step(`${chalk.bold(target)} · ${config.model}${effortStr} · ${mode}`);
+    clack.log.info(chalk.dim(`${dirtyCount} dirty specs to compile`));
 }
 
 function printSummary(
@@ -640,23 +638,19 @@ function printSummary(
     const passLabel = passNumber > 1 ? ` (pass ${passNumber})` : "";
     const filesLine = deleted > 0 ? `${files} written, ${deleted} deleted` : `${files} written`;
     const body = [
-        `${chalk.green("✓")} Compilation complete — target: ${target}${passLabel}`,
-        ``,
-        `  Model:    ${config.model}${config.effort ? ` (${config.effort} effort)` : ""}`,
-        `  Time:     ${formatDuration(elapsed)}`,
-        `  Files:    ${filesLine}`,
-        `  LOC:      ~${lines.toLocaleString()} lines`,
-        `  Tokens:   ~${totalTokens.toLocaleString()} total ${tokenDetail}`,
-        `  Tools:    ${metrics.toolCalls} calls`,
-        `  Passes:   ${passNumber}`,
-        ``,
-        `  Output:   ${relative(SPECS_DIR, outDir)}/`,
-        noLock ? `  Lock:     skipped (--no-lock)` : `  Lock:     ${relative(SPECS_DIR, lockPath(target))} updated`,
+        `Model:    ${config.model}${config.effort ? ` (${config.effort} effort)` : ""}`,
+        `Time:     ${formatDuration(elapsed)}`,
+        `Files:    ${filesLine}`,
+        `LOC:      ~${lines.toLocaleString()} lines`,
+        `Tokens:   ~${totalTokens.toLocaleString()} total ${tokenDetail}`,
+        `Tools:    ${metrics.toolCalls} calls`,
+        `Passes:   ${passNumber}`,
+        `Output:   ${relative(SPECS_DIR, outDir)}/`,
+        noLock ? `Lock:     skipped (--no-lock)` : `Lock:     ${relative(SPECS_DIR, lockPath(target))}`,
     ].join("\n");
 
-    log("");
-    log(body);
-    log("");
+    clack.log.success(`Compilation complete — target: ${target}${passLabel}`);
+    clack.log.message(chalk.dim(body));
 }
 
 async function cmdBuild(
@@ -716,8 +710,7 @@ async function cmdBuild(
 
     // 5. Print header
     const sessionMode = autopilot ? "autopilot" : "interactive";
-    printBuildHeader(target, config, sessionMode);
-    log(`  ${chalk.dim(`${dirty.length} dirty specs to compile`)}\n`);
+    printBuildHeader(target, config, sessionMode, dirty.length);
 
     // 6. Metrics
     const metrics: CompileMetrics = {
@@ -806,12 +799,15 @@ your final message like this:
         // biome-ignore lint/suspicious/noExplicitAny: SDK config types are complex
         session = await client.createSession(sessionConfig as any);
     } catch (err) {
-        log(chalk.red("✗") + " Failed to create agent session.");
-        if (err instanceof Error) log(chalk.dim(`  Error: ${err.message}`));
-        log("\n  This could mean:");
-        log("    • The model is unavailable or unsupported");
-        log("    • Your Copilot subscription doesn't include this model");
-        log("    • A transient service error — try again\n");
+        clack.log.error("Failed to create agent session.");
+        if (err instanceof Error) clack.log.message(chalk.dim(`Error: ${err.message}`));
+        clack.log.message(
+            "This could mean:\n" +
+                "  • The model is unavailable or unsupported\n" +
+                "  • Your Copilot subscription doesn't include this model\n" +
+                "  • A transient service error — try again",
+        );
+        clack.outro(chalk.red("Exiting"));
         await client.stop();
         process.exit(1);
     }
@@ -827,7 +823,7 @@ your final message like this:
     const sigintHandler = async () => {
         if (aborted) return;
         aborted = true;
-        log(chalk.yellow("\n\n⚠ Compilation interrupted"));
+        clack.outro(chalk.yellow("Compilation interrupted"));
         try {
             await session.abort();
             await session.disconnect();
@@ -864,7 +860,7 @@ your final message like this:
             log(chalk.dim(`  ${icon} ${toolId}`));
         });
     } else {
-        // ── Normal mode: compact status ──
+        // ── Normal mode: compact status using clack timeline ──
         session.on("assistant.message_delta", () => {
             // Suppress in normal mode — we show phase-level status instead
         });
@@ -875,15 +871,14 @@ your final message like this:
             const phase = detectPhase(toolName, event.data.arguments);
 
             if (phase !== currentPhase) {
-                // Complete previous phase
                 if (currentPhase !== "Starting") {
-                    log(`  ${chalk.green("✓")} ${currentPhase}`);
+                    clack.log.success(currentPhase);
                 }
                 currentPhase = phase;
+                clack.log.step(phase);
             }
 
-            // Show current tool activity
-            log(chalk.dim(`    ${toolName}${argStr ? ` ${argStr}` : ""}`));
+            clack.log.message(chalk.dim(`${toolName}${argStr ? ` ${argStr}` : ""}`));
         });
     }
 
@@ -934,7 +929,7 @@ your final message like this:
         if (verbose) {
             log(chalk.red(`\n✗ Session error: ${msg}`));
         } else {
-            log(`  ${chalk.red("✗")} ${msg}`);
+            clack.log.error(msg);
         }
     });
 
@@ -954,24 +949,20 @@ your final message like this:
 
     // Complete final phase in normal mode
     if (!verbose && currentPhase !== "Starting") {
-        log(`  ${chalk.green("✓")} ${currentPhase}`);
+        clack.log.success(currentPhase);
     }
 
     // Show the agent's last message as a pass recap
     if (metrics.lastAssistantMessage) {
         const rendered = marked(metrics.lastAssistantMessage.trim()) as string;
-        log(`\n${boxen(rendered.trimEnd(), { padding: 1, dimBorder: true, title: "Agent summary", titleAlignment: "left" })}`);
+        clack.note(rendered.trimEnd(), "Agent summary");
     }
 
     // Show summary for this pass
     printSummary(target, config, metrics, outDir, noLock, passNumber);
 
     if (metrics.errors.length > 0) {
-        log(chalk.yellow("⚠ Completed with errors:"));
-        for (const err of metrics.errors) {
-            log(`  ${chalk.red("•")} ${err}`);
-        }
-        log("");
+        clack.log.warn("Completed with errors:\n" + metrics.errors.map((e) => `  ${chalk.red("•")} ${e}`).join("\n"));
     }
 
     // 11. Multi-pass loop — user can always trigger additional passes
@@ -983,7 +974,7 @@ your final message like this:
         currentPhase = "Starting";
         metrics.errors = [];
 
-        log(`\n${chalk.cyan("●")} Pass ${passNumber} — sending improvement prompt...\n`);
+        clack.log.step(`Pass ${passNumber} — sending improvement prompt`);
 
         await session.send({
             prompt: [
@@ -1007,26 +998,23 @@ your final message like this:
         await waitForIdle();
 
         if (!verbose && currentPhase !== "Starting") {
-            log(`  ${chalk.green("✓")} ${currentPhase}`);
+            clack.log.success(currentPhase);
         }
 
         if (metrics.lastAssistantMessage) {
             const rendered = marked(metrics.lastAssistantMessage.trim()) as string;
-            log(`\n${boxen(rendered.trimEnd(), { padding: 1, dimBorder: true, title: "Agent summary", titleAlignment: "left" })}`);
+            clack.note(rendered.trimEnd(), "Agent summary");
         }
 
         printSummary(target, config, metrics, outDir, noLock, passNumber);
 
         if (metrics.errors.length > 0) {
-            log(chalk.yellow("⚠ Pass completed with errors:"));
-            for (const err of metrics.errors) {
-                log(`  ${chalk.red("•")} ${err}`);
-            }
-            log("");
+            clack.log.warn("Pass completed with errors:\n" + metrics.errors.map((e) => `  ${chalk.red("•")} ${e}`).join("\n"));
         }
     }
 
     // 12. Cleanup
+    clack.outro(chalk.dim("Session ended"));
     try {
         await session.disconnect();
         await client.stop();
