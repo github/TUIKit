@@ -974,57 +974,55 @@ your final message like this:
         log("");
     }
 
-    // 11. Multi-pass loop (interactive mode only — autopilot is handled by the SDK)
-    if (!autopilot) {
-        while (!aborted && process.stdin.isTTY) {
-            const wantMore = await confirmPass();
-            if (!wantMore) break;
+    // 11. Multi-pass loop — user can always trigger additional passes
+    while (!aborted && process.stdin.isTTY) {
+        const wantMore = await confirmPass();
+        if (!wantMore) break;
 
-            passNumber++;
-            currentPhase = "Starting";
-            metrics.errors = [];
+        passNumber++;
+        currentPhase = "Starting";
+        metrics.errors = [];
 
-            log(`\n${chalk.cyan("●")} Pass ${passNumber} — sending improvement prompt...\n`);
+        log(`\n${chalk.cyan("●")} Pass ${passNumber} — sending improvement prompt...\n`);
 
-            await session.send({
-                prompt: [
-                    "Do another pass over the compilation output.",
-                    "Re-read the original spec files and the compile prompt at " +
-                        `\`${relative(SPECS_DIR, promptPath)}\` to check what you may have missed.`,
-                    "",
-                    "Remember: DEPTH OVER BREADTH. A few components working perfectly",
-                    "(with interactive demo) is better than many half-working ones.",
-                    "",
-                    "Focus on:",
-                    "- The interactive demo (`--interactive`) — it MUST work as a full-screen playground",
-                    "- Components already implemented: polish, fix bugs, ensure full interactivity",
-                    "- Tests that are failing or missing",
-                    "- Add the NEXT component (fully: implementation + tests + demo wiring)",
-                    "- Token usage correctness",
-                    "After fixing, run the tests and verify `--interactive` works, then report results.",
-                ].join("\n"),
-            });
+        await session.send({
+            prompt: [
+                "Do another pass over the compilation output.",
+                "Re-read the original spec files and the compile prompt at " +
+                    `\`${relative(SPECS_DIR, promptPath)}\` to check what you may have missed.`,
+                "",
+                "Remember: DEPTH OVER BREADTH. A few components working perfectly",
+                "(with interactive demo) is better than many half-working ones.",
+                "",
+                "Focus on:",
+                "- The interactive demo (`--interactive`) — it MUST work as a full-screen playground",
+                "- Components already implemented: polish, fix bugs, ensure full interactivity",
+                "- Tests that are failing or missing",
+                "- Add the NEXT component (fully: implementation + tests + demo wiring)",
+                "- Token usage correctness",
+                "After fixing, run the tests and verify `--interactive` works, then report results.",
+            ].join("\n"),
+        });
 
-            await waitForIdle();
+        await waitForIdle();
 
-            if (!verbose && currentPhase !== "Starting") {
-                log(`  ${chalk.green("✓")} ${currentPhase}`);
+        if (!verbose && currentPhase !== "Starting") {
+            log(`  ${chalk.green("✓")} ${currentPhase}`);
+        }
+
+        if (metrics.lastAssistantMessage) {
+            const rendered = marked(metrics.lastAssistantMessage.trim()) as string;
+            log(`\n${boxen(rendered.trimEnd(), { padding: 1, dimBorder: true, title: "Agent summary", titleAlignment: "left" })}`);
+        }
+
+        printSummary(target, config, metrics, outDir, noLock, passNumber);
+
+        if (metrics.errors.length > 0) {
+            log(chalk.yellow("⚠ Pass completed with errors:"));
+            for (const err of metrics.errors) {
+                log(`  ${chalk.red("•")} ${err}`);
             }
-
-            if (metrics.lastAssistantMessage) {
-                const rendered = marked(metrics.lastAssistantMessage.trim()) as string;
-                log(`\n${boxen(rendered.trimEnd(), { padding: 1, dimBorder: true, title: "Agent summary", titleAlignment: "left" })}`);
-            }
-
-            printSummary(target, config, metrics, outDir, noLock, passNumber);
-
-            if (metrics.errors.length > 0) {
-                log(chalk.yellow("⚠ Pass completed with errors:"));
-                for (const err of metrics.errors) {
-                    log(`  ${chalk.red("•")} ${err}`);
-                }
-                log("");
-            }
+            log("");
         }
     }
 
