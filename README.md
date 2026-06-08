@@ -22,6 +22,19 @@ flowchart LR
 5. Generated code goes to **dist/** — specs stay clean
 6. **Lock files** track which spec versions have been compiled
 
+## Positioning
+
+TUIkit applies the headless UI primitive model to terminal interfaces. Like
+Radix Primitives and Base UI, it treats components as accessible, composable,
+unstyled building blocks. Unlike web-first headless libraries, TUIkit keeps the
+primitive contract in language-agnostic specs and uses an LLM agent as the
+compiler backend to generate idiomatic implementations for each TUI framework.
+
+This makes the markdown specs an intermediate representation: they capture
+behavior, accessibility expectations, semantic tokens, tests, and previews,
+while target specs define how those contracts map into Go/Bubbletea,
+TypeScript/Ink, Bun/OpenTUI, Rust/Ratatui, or future terminal UI stacks.
+
 ## Quick start
 
 ### Prerequisites
@@ -377,6 +390,55 @@ The GitHub Actions workflow (`.github/workflows/specs-ci.yml`) runs on every PR:
 For TUI design foundations — color systems, typography, iconography, layout
 grids, accessibility patterns, keybinding conventions, and buffer management —
 see [`docs/foundations.md`](docs/foundations.md).
+
+## Bibliography
+
+### Headless UI primitives
+
+- [Radix Primitives](https://www.radix-ui.com/primitives/docs/overview/introduction)
+  — low-level, accessible, unstyled React primitives for building design
+  systems. TUIkit follows the same separation of behavior from presentation for
+  terminal UI components.
+- [Base UI](https://base-ui.com/) — unstyled, accessible React components from
+  the creators of Radix, Floating UI, and Material UI. Its emphasis on
+  composability, consistency, and no visual opinions mirrors TUIkit's
+  spec-first primitive model.
+- [WAI-ARIA Authoring Practices Guide](https://www.w3.org/WAI/ARIA/apg/) —
+  reference patterns for accessible web widgets. TUIkit uses analogous
+  accessibility contracts for terminal interactions, keyboard behavior, and
+  announcements.
+- [React Aria](https://react-spectrum.adobe.com/react-aria/) — accessibility
+  primitives separated from styling. Useful precedent for defining interaction
+  behavior independently from visual rendering.
+
+### LLM compilers and specification-to-code systems
+
+- [Language Models as Compilers: Simulating Pseudocode Execution Improves
+  Algorithmic Reasoning in Language Models](https://arxiv.org/abs/2404.02575)
+  — frames language models as systems that infer reusable task-level logic and
+  execute it for specific instances. TUIkit similarly separates reusable specs
+  from target-specific generation.
+- [Requirements are All You Need: From Requirements to Code with
+  LLMs](https://arxiv.org/html/2406.10101v1) — explores progressive prompting
+  from requirements to tests and implementation. TUIkit's specs, tests, and
+  compile prompts follow a similar structured requirements-to-code workflow.
+- [Iterative Refinement of Project-Level Code Context for Precise Code
+  Generation with Compiler Feedback](https://aclanthology.org/2024.findings-acl.138/)
+  — introduces compiler/static-analysis feedback loops for improving generated
+  code. TUIkit's lint, test, prompt, and lock workflow provides a similar
+  verification loop for generated component implementations.
+- [Combining LLM Code Generation with Formal Specifications and Reactive
+  Program Synthesis](https://arxiv.org/abs/2410.19736) — combines LLM code
+  generation with formal methods-based synthesis. This points toward stronger
+  future conformance checks for TUIkit specs.
+- [SpecifyUI: Supporting Iterative UI Design Intent Expression through
+  Structured Specifications and Generative AI](https://arxiv.org/html/2509.07334v1)
+  — introduces a structured UI intermediate representation for controllable
+  generative design. TUIkit uses markdown specs as a terminal UI-oriented
+  intermediate representation.
+- [A2UI](https://a2ui.org/) — a declarative, framework-agnostic protocol for
+  agent-generated UI surfaces. It is adjacent to TUIkit's goal of expressing UI
+  intent once and rendering it across target environments.
 
 ## License
 
