@@ -419,7 +419,7 @@ see [`docs/foundations.md`](docs/foundations.md).
   execute it for specific instances. TUIkit similarly separates reusable specs
   from target-specific generation.
 - [Requirements are All You Need: From Requirements to Code with
-  LLMs](https://arxiv.org/html/2406.10101v1) — explores progressive prompting
+  LLMs](https://arxiv.org/abs/2406.10101) — explores progressive prompting
   from requirements to tests and implementation. TUIkit's specs, tests, and
   compile prompts follow a similar structured requirements-to-code workflow.
 - [Iterative Refinement of Project-Level Code Context for Precise Code
@@ -432,7 +432,7 @@ see [`docs/foundations.md`](docs/foundations.md).
   generation with formal methods-based synthesis. This points toward stronger
   future conformance checks for TUIkit specs.
 - [SpecifyUI: Supporting Iterative UI Design Intent Expression through
-  Structured Specifications and Generative AI](https://arxiv.org/html/2509.07334v1)
+  Structured Specifications and Generative AI](https://arxiv.org/abs/2509.07334)
   — introduces a structured UI intermediate representation for controllable
   generative design. TUIkit uses markdown specs as a terminal UI-oriented
   intermediate representation.
