@@ -5,7 +5,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.2.0",
-    "@github/copilot-sdk": "^0.3.0",
+    "@github/copilot-sdk": "^1.0.8",
     "chalk": "^5.6.2",
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
