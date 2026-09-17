@@ -9,7 +9,7 @@
     "chalk": "^5.6.2",
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
-    "marked": "14",
+    "marked": "18",
     "marked-terminal": "7",
     "remark": "^15.0.1",
     "remark-frontmatter": "^5.0.0",
